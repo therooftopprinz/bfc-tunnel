@@ -1,0 +1,116 @@
+# BFC Tunneling Protocol
+
+## 1 Core Concepts
+
+### 1.1 Overview
+* Overlay network over UDP. Nodes identified by 128‑bit random IDs (self‑generated, no leases).
+* Tunnel payload arbitrary (IPv4, app data).
+* Mediators – publicly reachable nodes acting as default switches and NAT traversal helpers.
+* NAT traversal – mediator‑assisted hole punching to establish direct p2p UDP between nodes behind NAT.
+
+## 2 Message Framing
+| Type        | Field       | Description         |
+|-------------|-------------|---------------------|
+| static data                                     |
+| u4          | version     | Protocol Version    |
+| u4          | msg_type    | Messaged Type       |
+| u8          | flag        | Flag bits           |
+| u16         | ttl         | Time To Live        |
+| u16         | size        | Message Data Size   |
+| u128        | src         | Source Node ID      |
+| u128        | dst         | Destination Node ID |
+| dynamic                                         |
+| size        | payload     | Message Data        |
+
+### 2.1 Version
+* Major Protocol Version.
+* Not compatible with other major version.
+
+### 2.1.2 Node ID
+Node ID is a 128-bit structure used to identify a node.
+| Size | Field  | Description                     |
+|------|--------|---------------------------------|
+| 8    | domain | Broadcast Domain                |
+| 56   | csprng | Random                          |
+| 64   | ts     | Epoch Time Stamp in nanoseconds |
+
+
+|(u8 broadcast_domain  (u56 CSPRNG) || (u64 timestamp_ns)
+
+### 2.1.3 Message Types
+* 0x01 - DATA
+* 0x02 - ROUTE_ANNOUNCE
+* 0x03 - ROUTE_REQUEST
+* 0x04 - HELLO
+* 0x05 - HELLO_ACK
+* 0x06 - KEEPALIVE
+* 0x07 - MEDIATOR_ANNOUNCE
+* 0x08 - HOLE_PUNCH_REQ
+* 0x09 - HOLE_PUNCH_RESP
+* 0x0A - ID_ANNOUNCE
+* 0x0B - ID_CONFLICT_RESOLVED
+* 0x0E - NEIGHBOR_CANDIDATE_REQUEST
+* 0x0F - NEIGHBOR_CANDIDATE_RESPONSE
+* 0x10 - DISCOVER
+* 0x11 - DISCOVER_REPLY
+
+### 2.2  DATA
+Used transport tunnel data
+#### 2.2.1 Payload
+* Service Data Unit
+
+
+2.3  ROUTE_ANNOUNCE
+2.3.1 Payload
+
+2.4  ROUTE_REQUEST
+2.4.1 Payload
+
+
+2.5  HELLO
+2.5.1 Payload
+
+
+2.6  HELLO_ACK
+2.6.1 Payload
+
+
+2.7  KEEPALIVE
+2.7.1 Payload
+
+
+2.8  MEDIATOR_ANNOUNCE
+2.8.1 Payload
+
+
+2.9  HOLE_PUNCH_REQ
+2.9.1 Payload
+
+
+2.10 HOLE_PUNCH_RESP
+2.10.1 Payload
+
+
+2.11 ID_ANNOUNCE
+2.11.1 Payload
+
+
+2.12 ID_CONFLICT_RESOLVED
+2.12.1 Payload
+
+
+2.13 NEIGHBOR_CANDIDATE_REQUEST
+2.13.1 Payload
+
+
+2.14 NEIGHBOR_CANDIDATE_RESPONSE
+2.14.1 Payload
+
+
+2.15 DISCOVER
+2.15.1 Payload
+
+
+2.16 DISCOVER_REPLY
+2.16.1 Payload
+

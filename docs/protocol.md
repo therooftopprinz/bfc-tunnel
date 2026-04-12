@@ -51,8 +51,8 @@ The `type` field in §2 framing is **4 bits** (`u4`); values below are the numer
 
 | Value | Name           | Description                                                                                                        |
 |-------|----------------|--------------------------------------------------------------------------------------------------------------------|
-| 0x00  | ID_REQUEST     | Member asks the hub for a Node ID; payload `domain` and `flags` (§3.1).                                            |
-| 0x01  | ID_RESPONSE    | Hub assigns a Node ID and returns it (plus echoed `flags`) to the member (§3.2).                                   |
+| 0x00  | ID_REQUEST     | Member asks the hub for a node ID; payload `domain` and `flags` (§3.1).                                            |
+| 0x01  | ID_RESPONSE    | Hub assigns a node ID and returns it (plus echoed `flags`) to the member (§3.2).                                   |
 | 0x02  | LINK_INFO      | Per-link counters and sender timestamp; acts as a heartbeat; peer MUST reply at once with its own snapshot (§3.3). |
 | 0x03  | LINK_REPORT    | Derived link quality: timestamp and receive-drop estimate from peer `LINK_INFO` `snt_*` vs local `rcv_*` (§3.4).   |
 | 0x04  | ROUTE_ANNOUNCE | Reachability propagation: `origin` → next hop → `target` with announce sequence and path metric (§3.5).            |
@@ -62,8 +62,8 @@ The `type` field in §2 framing is **4 bits** (`u4`); values below are the numer
 
 ## 3 Messages
 ### 3.1 ID_REQUEST
-Sent to hub to request a Node ID. Node ID is associated with its outer-network address.
-If the network address has changed, the Node ID is invalidated.
+Sent to hub to request a node ID. Node ID is associated with its outer-network address.
+If the network address has changed, the node ID is invalidated.
 
 **Message Data**
 | Size | Field  | Description                                                                                       |
@@ -82,14 +82,14 @@ There are cases that a joining member only have an access to a node in the netwo
 In this case, the joining member can connect and request id to its local neighbor node and sends a delegated request id to the hub.
 
 ### 3.2 ID_RESPONSE
-Hub reply to `ID_REQUEST`. Carries the **assigned** overlay Node ID for this member’s current outer UDP binding. The member MUST adopt `node_id` as its `src` (and in all subsequent framed messages) until the outer address changes, at which point the ID is invalidated per §2.2 / §3.1.
+Hub reply to `ID_REQUEST`. Carries the **assigned** overlay node ID for this member’s current outer UDP binding. The member MUST adopt `node_id` as its `src` (and in all subsequent framed messages) until the outer address changes, at which point the ID is invalidated per §2.2 / §3.1.
 
 **Message Data**
 | Size | Field   | Description       |
 |------|---------|-------------------|
 | u64  | id      | Response ID       |
 | u8   | status  | Status Code       |
-| u128 | node_id | Allocated Node ID |
+| u128 | node_id | Allocated node ID |
 
 **Status Code**
 | Value | Name   | Description                                                                                                |
@@ -127,17 +127,25 @@ Typically sent soon after processing a peer `LINK_INFO` so the estimate referenc
 | Size | Field    | Description              |
 |------|----------|--------------------------|
 | **static data**                            |
+| u16  | asn      | Announce sequence number |
+| u16  | page     | Current page number      |
+| u16  | total    | Total page number        |
+| u8   | flags    | Flags                    |
 | u8   | count    | Number of entries        |
 | **dynamic data**                           |
 | *Entries*                                  |
 
+**Flags**
+| offset | Field       | Description         |
+|--------|-------------|---------------------|
+| 0      | is_snapshot | Snapshot            |
+
 **Entry**
 | Size | Field    | Description              |
-|------|----------|--------------------------|  
+|------|----------|--------------------------|
 | u128 | origin   | Origin                   |
 | u128 | next     | Next hop node            |
-| u128 | target   | Target Node              |
-| u16  | asn      | Announce sequence number |
+| u128 | target   | Target node              |
 | u16  | metric   | Path Metric              |
 
 ### 3.6 HUB_ANNOUNCE
@@ -198,7 +206,7 @@ Discovery is how a node learns **who exists**, **which hub completes bootstrap `
 Members are configured with a **list of hub UDP endpoints** `(addr4, port)` and attempt them until one is reachable.
 The member sends **`ID_REQUEST`** (§3.1) to the hub.
 The hub replies with **`ID_RESPONSE`** (§3.2):
-on status **`OK`**, the member adopts the returned `node_id`; on **`NO_NET`**, a delegated request could not reach the network (§3.1). A non-**`OK`** **`ID_RESPONSE`** is the negative discovery path for that attempt: the member must not treat the overlay as having allocated a Node ID until it receives **`OK`** and adopts the returned `node_id`.
+on status **`OK`**, the member adopts the returned `node_id`; on **`NO_NET`**, a delegated request could not reach the network (§3.1). A non-**`OK`** **`ID_RESPONSE`** is the negative discovery path for that attempt: the member must not treat the overlay as having allocated a node ID until it receives **`OK`** and adopts the returned `node_id`.
 
 
 A member learns that the overlay **accepts its node ID** from that successful **`ID_RESPONSE` (`OK`)** after its **single** bootstrap **`ID_REQUEST`** to the chosen hub (§3.1–§3.2). The bootstrap hub’s **`HUB_ANNOUNCE`** lets the member learn other hubs’ node id and may open **direct outer UDP** toward them when needed (e.g. using `P2P_INDICATION` for hole punching).

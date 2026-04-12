@@ -52,15 +52,12 @@ The `domain` field also defines an **implicit broadcast group** encoded in the a
 | 0x00  | LINK_REPORT                 | Derived link quality: timestamp plus receive drop estimate from peer `LINK_INFO` `snt_*` vs local `rcv_*`. |
 | 0x00  | ROUTE_ANNOUNCE              | Propagates reachability: origin → next hop → target with announce sequence and path metric.                |
 | 0x00  | HUB_ANNOUNCE                | Spreads a hub’s public IPv4 and UDP port after a hub identifies (from `ID_ANNOUNCE`).                      |
-| 0x00  | HELLO                       |                                 |
-| 0x00  | HELLO_ACK                   |                                 |
-| 0x00  | HOLE_PUNCH_REQ              |                                 |
-| 0x00  | HOLE_PUNCH_RESP             |                                 |
-| 0x00  | NEIGHBOR_CANDIDATE_REQUEST  |                                 |
-| 0x00  | NEIGHBOR_CANDIDATE_RESPONSE |                                 |
-| 0x00  | DISCOVER                    |                                 |
-| 0x00  | DISCOVER_REPLY              |                                 |
-| 0x00  | TUNNEL_DATA                 |                                 |
+| 0x00  | P2P_INDICATION              | Hub-relayed reflexive UDP endpoints so peers can hole-punch toward each other.                             |
+| 0x00  | NEIGHBOR_CANDIDATE_REQUEST  | Asks for candidate direct peers or endpoints (e.g. toward a target node).                                  |
+| 0x00  | NEIGHBOR_CANDIDATE_RESPONSE | Supplies neighbor or endpoint candidates in reply to `NEIGHBOR_CANDIDATE_REQUEST`.                         |
+| 0x00  | DISCOVER                    | Overlay discovery/query; semantics and payload are implementation-defined.                                 |
+| 0x00  | DISCOVER_REPLY              | Response to `DISCOVER`.                                                                                    |
+| 0x00  | TUNNEL_DATA                 | Encapsulated tunneled payload for the session (inner packet or stream data toward `dst`).                  |
 
 ## 3 Messages
 ### 3.1  ID_ANNOUNCE
@@ -139,3 +136,31 @@ Then propagated to members and peer hubs with `HUB_ANNOUNCE` to advertise new hu
 |------|----------|--------------------------------------------------------|
 | u32  | addr4    | Hub’s public IPv4 address.                             |
 | u16  | port     | UDP port for overlay traffic on that public interface. |
+
+### 3.7 P2P_INDICATION
+Hub-assisted hole punching: indications relay each peer’s reflexive public endpoint (`hostv4`, `port`); how endpoints are probed or kept open is local to implementations.
+
+`hostv4`/`port` are **`origin`’s** public UDP endpoint **as seen toward `target`** (what `target` uses to punch). Members SHOULD send them empty to their hub; the hub MUST set them from the observed UDP source (or an equivalent member binding) before relaying toward `target`. A hub as `origin` SHOULD set them to its published overlay endpoint (same as `HUB_ANNOUNCE` for that interface). After a member-originated indication, later hops may source UDP from a hub while the payload still carries the filled reflexive endpoint; relays forward non-empty hub-`origin` values unless policy replaces them.
+
+**Message Data**
+| Size | Field    | Description                                            |
+|------|----------|--------------------------------------------------------|
+| u128 | origin   | Node ID of the peer whose endpoint is in `hostv4`/`port`. |
+| u128 | target   | Node ID of the peer that should receive this indication. |
+| u32  | hostv4   | Origin’s public IPv4. Empty on member→hub (hub sets before relay). Hub as `origin` SHOULD set directly. |
+| u16  | port     | Origin’s UDP port for that IPv4. Empty on member→hub (hub sets before relay). Hub as `origin` SHOULD set directly. |
+
+```mermaid
+sequenceDiagram
+    participant A as Node A
+    participant HA as Hub of A
+    participant B as Node B
+    participant HB as Hub of B
+
+    Note over A,B: Member→hub: empty hostv4/port. Hub fills from observed UDP public endpoint, then relays.
+
+    A->>HA: P2P_INDICATION<br/>origin=A, target=B, empty hostv4/port
+    HA->>B: P2P_INDICATION<br/>origin=A, target=B, hub sets A public hostv4/port
+    B->>HB: P2P_INDICATION<br/>origin=B, target=A, empty hostv4/port
+    HB->>A: P2P_INDICATION<br/>origin=B, target=A, hub sets B public hostv4/port
+```

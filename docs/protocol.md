@@ -8,7 +8,7 @@
 * Hub – publicly reachable nodes acting as default switches and NAT traversal helpers.
 * Member - Nodes connecting to the hub, members are not publicly reachable (or opted not to).
 * Hubs can connect each other to for an extended star.
-* Members can form P2P to other members in the network through hub assisted NAT-traversal.
+* Members can form P2P to other members in the overlay through hub assisted NAT-traversal.
 
 ## 2 Message Framing
 | Type        | Field       | Description         |
@@ -33,9 +33,11 @@ Node ID is a 128-bit structure used to identify a node.
 Node ID is not reusable, it is discarded if the network/transport
 has changed (change udp endpoint).
 
-The overlay uses one **shared node-ID space** across the interconnected network: `domain`, `csprng`, and `ts` are all part of the same address (the domain is not a separate namespace beside the node ID).
+The overlay uses one **shared node-ID space** across the interconnected network:
+`domain`, `csprng`, and `ts` are all part of the same address (the domain is not a separate namespace beside the node ID).
 
-The `domain` field also defines an **implicit broadcast group** encoded in the address. To broadcast to all nodes in broadcast domain *D*, set the message’s destination node ID with `domain = D` and `ts = 0` (per the usual framing rules for `dst`).
+The `domain` field also defines an **implicit broadcast group** encoded in the address.
+To broadcast to all nodes in broadcast domain *D*, set the message’s destination node ID with `domain = D` and `ts = 0` (per the usual framing rules for `dst`).
 
 | Size | Field  | Description                     |
 |------|--------|---------------------------------|
@@ -44,46 +46,56 @@ The `domain` field also defines an **implicit broadcast group** encoded in the a
 | 64   | ts     | Epoch Time Stamp in nanoseconds |
 
 ### 2.3 Message Types
-| Value | Name                        | Description                                                                                                |
-|-------|-----------------------------|------------------------------------------------------------------------------------------------------------|
-| 0x00  | ID_ANNOUNCE                 | Member announces its node ID to the hub (new and previous ID, seq, hub/delegation flags).                  |
-| 0x00  | ID_CONFLICT                 | Hub tells the sender its claimed ID is already active on the overlay.                                      |
-| 0x00  | LINK_INFO                   | Per-link counters and sender timestamp; heartbeat; peer replies immediately with its own report.           |
-| 0x00  | LINK_REPORT                 | Derived link quality: timestamp plus receive drop estimate from peer `LINK_INFO` `snt_*` vs local `rcv_*`. |
-| 0x00  | ROUTE_ANNOUNCE              | Propagates reachability: origin → next hop → target with announce sequence and path metric.                |
-| 0x00  | HUB_ANNOUNCE                | Spreads a hub’s public IPv4 and UDP port after a hub identifies (from `ID_ANNOUNCE`).                      |
-| 0x00  | P2P_INDICATION              | Hub-relayed reflexive UDP endpoints so peers can hole-punch toward each other.                             |
-| 0x00  | NEIGHBOR_CANDIDATE_REQUEST  | Asks for candidate direct peers or endpoints (e.g. toward a target node).                                  |
-| 0x00  | NEIGHBOR_CANDIDATE_RESPONSE | Supplies neighbor or endpoint candidates in reply to `NEIGHBOR_CANDIDATE_REQUEST`.                         |
-| 0x00  | DISCOVER                    | Overlay discovery/query; semantics and payload are implementation-defined.                                 |
-| 0x00  | DISCOVER_REPLY              | Response to `DISCOVER`.                                                                                    |
-| 0x00  | TUNNEL_DATA                 | Encapsulated tunneled payload for the session (inner packet or stream data toward `dst`).                  |
+The `type` field in §2 framing is **4 bits** (`u4`); values below are the numeric codes for each payload layout in §3.
+
+| Value | Name           | Description                                                                                                |
+|-------|----------------|------------------------------------------------------------------------------------------------------------|
+| 0x00  | ID_REQUEST     | Member asks the hub for a Node ID; payload `domain` and `flags` (§3.1).                                    |
+| 0x01  | ID_RESPONSE    | Hub assigns a Node ID and returns it (plus echoed `flags`) to the member (§3.2).                           |
+| 0x02  | LINK_INFO      | Per-link counters and sender timestamp; acts as a heartbeat; peer MUST reply at once with its own snapshot (§3.3). |
+| 0x03  | LINK_REPORT    | Derived link quality: timestamp and receive-drop estimate from peer `LINK_INFO` `snt_*` vs local `rcv_*` (§3.4). |
+| 0x04  | ROUTE_ANNOUNCE | Reachability propagation: `origin` → next hop → `target` with announce sequence and path metric (§3.5).  |
+| 0x05  | HUB_ANNOUNCE   | Announces hub overlay identity to members and peer hubs so clients learn hub `NodeID` entries (and, by policy, outer `(addr4, port)`); layout §3.6. |
+| 0x06  | P2P_INDICATION | Hub-assisted hole punching: reflexive public UDP endpoint for `origin` as seen toward `target` (§3.7).     |
+| 0x07  | TUNNEL_DATA    | Encapsulated payload for the tunnel session (inner packet or stream data toward `dst`).                    |
 
 ## 3 Messages
-### 3.1  ID_ANNOUNCE
-Sent to hub to announce new id of the node.
-Hub will drop packets if the node has not identified.
+### 3.1 ID_REQUEST
+Sent to hub to request a Node ID. Node ID is associated with its outer-network address.
+If the network address has changed, the Node ID is invalidated.
 
 **Message Data**
-| Size | Field  | Description      |
-|------|--------|------------------|
-| u128 | id     | Node ID          |
-| u128 | old_id | Old Node ID      |
-| u32  | sn     | Sequencer Number |
-| u8   | flags  | Flags            |
+| Size | Field  | Description                                                                                      |
+|------|--------|--------------------------------------------------------------------------------------------------|
+| u64  | id     | Request ID (csrng), when the request is delegated this will be used to determine the return path |
+| u8   | domain | Broadcast Domain                                                                                 |
+| u8   | flags  | Flags                                                                                            |
 
 **Flags**
 | offset | Field       | Descrption         |
 |--------|-------------|--------------------|
 | 0      | is_hub      | Node is a hub      |
-| 1      | delegated   | Delegated announce |
+| 1      | delegated   | Delegated request  |
 
-### 3.2 ID_CONFLICT
-If ID is already existing in active nodes, hub will send ID_CONFLICT to the announcer.
-Across interconnected hubs, peer hubs coordinate so no two active nodes share the same full 128-bit node ID.
+There are cases that a joining member only have an access to a node in the network.
+In this case, the joining member can connect and request id to its local neighbor node and sends a delegated request id to the hub.
 
-**No Data Fields**
+### 3.2 ID_RESPONSE
+Hub reply to `ID_REQUEST`. Carries the **assigned** overlay Node ID for this member’s current outer UDP binding. The member MUST adopt `node_id` as its `src` (and in all subsequent framed messages) until the outer address changes, at which point the ID is invalidated per §2.2 / §3.1.
 
+**Message Data**
+| Size | Field   | Description       |
+|------|---------|-------------------|
+| u64  | id      | Response ID       |
+| u8   | status  | Status Code       |
+| u128 | node_id | Allocated Node ID |
+
+**Status Code**
+| Value | Name   | Description                                                                                                |
+|-------|--------|-------------------------------------------------------------------------|
+| 0x00  | OK     | Node ID allocated.                                                      |
+| 0x01  | NO_NET | `ID_REQUEST` can't be delegated because the node is not in the network. |
+| 0xFF  | UNSPEC | Unspecified Error                                                       |
 ### 3.3 LINK_INFO
 Carries link status from the sender’s perspective: when the snapshot was taken and cumulative receive/send packet and byte counts on this direct link. Periodic `LINK_INFO` exchange (with the mandatory reply below) also serves as a **heartbeat**: implementations SHOULD treat prolonged absence of queries from the peer as link or peer loss, using a local timeout policy.
 
@@ -113,12 +125,12 @@ Typically sent soon after processing a peer `LINK_INFO` so the estimate referenc
 **Message Data**
 | Size | Field    | Description              |
 |------|----------|--------------------------|
-| static data                                |
+| **static data**                            |
 | u8   | count    | Number of entries        |
-| dynamic data                               |
-| *Entries*
+| **dynamic data**                           |
+| *Entries*                                  |
 
-**Entries**
+**Entry**
 | Size | Field    | Description              |
 |------|----------|--------------------------|  
 | u128 | origin   | Origin                   |
@@ -128,14 +140,26 @@ Typically sent soon after processing a peer `LINK_INFO` so the estimate referenc
 | u16  | metric   | Path Metric              |
 
 ### 3.6 HUB_ANNOUNCE
-Generated by hubs receiving the `ID_ANNOUNCE(is_hub=1)`.
-Then propagated to members and peer hubs with `HUB_ANNOUNCE` to advertise new hub.
+Generated by hubs receiving the `ID_ANNOUNCE(is_hub=1)`,
+then propagated to members and peer hubs with `HUB_ANNOUNCE` to advertise new hub.
+It is also sent (with `sn=0`) to any new node connecting to the network.
+If same announcer and sequencer number has been already received, ignore.
+If the `sn` is `0` or `TTL` is `0`, the receiver shall not broadcast the message.
 
 **Message Data**
+| Size | Field    | Description       |
+|------|----------|-------------------|
+| **static**                          |
+| u128 | origin   | Announcer         |
+| u64  | sn       | Sequence Number   |
+| u8   | count    | Number of entries |
+| **dynamic data**                    |
+| *Entries*                           |
+
+**Entry**
 | Size | Field    | Description                                            |
 |------|----------|--------------------------------------------------------|
-| u32  | addr4    | Hub’s public IPv4 address.                             |
-| u16  | port     | UDP port for overlay traffic on that public interface. |
+| u128 | NodeID   | Node ID of the hub                                     |
 
 ### 3.7 P2P_INDICATION
 Hub-assisted hole punching: indications relay each peer’s reflexive public endpoint (`hostv4`, `port`); how endpoints are probed or kept open is local to implementations.
@@ -164,3 +188,28 @@ sequenceDiagram
     B->>HB: P2P_INDICATION<br/>origin=B, target=A, empty hostv4/port
     HB->>A: P2P_INDICATION<br/>origin=B, target=A, hub sets B public hostv4/port
 ```
+
+## 4 Discovery
+
+Discovery is how a node learns **who exists**, **which hub completes bootstrap `ID_REQUEST` / `ID_RESPONSE`**, and **how to obtain direct UDP punch targets**.
+
+### 4.1 Bootstrap, hub, and identity discovery
+
+Members are configured with a **list of hub UDP endpoints** `(addr4, port)` and attempt them until one is reachable.
+The member sends **`ID_REQUEST`** (§3.1) to the hub.
+The hub replies with **`ID_RESPONSE`** (§3.2):
+on status **`OK`**, the member adopts the returned `node_id`; on **`NO_NET`**, a delegated request could not reach the network (§3.1). A non-**`OK`** **`ID_RESPONSE`** is the negative discovery path for that attempt: the member must not treat the overlay as having allocated a Node ID until it receives **`OK`** and adopts the returned `node_id`.
+
+
+A member learns that the overlay **accepts its node ID** from that successful **`ID_RESPONSE` (`OK`)** after its **single** bootstrap **`ID_REQUEST`** to the chosen hub (§3.1–§3.2). The bootstrap hub’s **`HUB_ANNOUNCE`** lets the member learn other hubs’ node id and may open **direct outer UDP** toward them when needed (e.g. using `P2P_INDICATION` for hole punching).
+
+
+Across interconnected hubs, **no two active nodes share the same full node ID**; hub coordination is part of making “who is this ID?” consistent network-wide.
+
+### 4.2 P2P endpoint discovery
+
+`P2P_INDICATION` gives each side the peer’s reflexive public `(hostv4, port)` (§3.7)—the outer UDP addresses used for hole punching. Hubs fill or relay those values; probes and keepalives are implementation-defined.
+
+## 5 Routing
+
+Routing is how a node decides **where to send a framed message next** so it reaches its `dst`—whether another member, a hub, or a broadcast domain.

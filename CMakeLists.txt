@@ -9,7 +9,7 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 
 # Pin to a specific upstream revision (see git ls-remote ... HEAD).
 set(BFC_GIT_REPOSITORY "https://github.com/therooftopprinz/bfc.git")
-set(BFC_GIT_TAG "d1ce0b34ee87a52309f2c8932a3e2a3db1849ee5")
+set(BFC_GIT_TAG "bd5e0cce68e8aea8adc8e995b1ad23361e425d29")
 
 # GoogleTest — pin to main HEAD (see git ls-remote https://github.com/google/googletest.git HEAD).
 set(GOOGLETEST_GIT_REPOSITORY "https://github.com/google/googletest.git")

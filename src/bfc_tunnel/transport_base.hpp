@@ -6,6 +6,12 @@
 namespace bfc_tunnel
 {
 
+struct transport_config_s
+{
+    std::string address;
+    uint16_t port;
+};
+
 class transport_base
 {
 public:

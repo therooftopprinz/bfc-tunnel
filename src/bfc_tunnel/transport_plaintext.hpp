@@ -6,37 +6,41 @@
 #include <bfc/default_reactor.hpp>
 #include <bfc/cv_reactor.hpp>
 
-#include <bfc_tunnel/transport_base.hpp>
 #include <bfc_tunnel/bfc_tunnel_types.hpp>
 
 namespace bfc_tunnel
 {
 
+struct transport_plaintext_config_s
+{
+    std::string address;
+    uint16_t port;
+};
+
 class transport_plaintext :
-    public transport_base,
     public std::enable_shared_from_this<transport_plaintext>
 {
 public:
     transport_plaintext(
-        io_reactor_ptr io_reactor,
-        cv_reactor_ptr cv_reactor,
-        node_transport_queue_ptr in_queue,
-        transport_node_queue_ptr out_queue
+        io_reactor_ptr_t io_reactor,
+        cv_reactor_ptr_t cv_reactor,
+        node_transport_queue_ptr_t in_queue,
+        transport_node_queue_ptr_t out_queue
     );
     ~transport_plaintext();
 
     void initialize();
     void uninitialize();
-    void configure(const transport_config_s& config);
+    void configure(const transport_plaintext_config_s& config);
 
 private:
     void on_in_queue_ready();
     void on_recv_ready();
 
-    io_reactor_ptr io_reactor;
-    cv_reactor_ptr cv_reactor;
-    node_transport_queue_ptr in_queue;
-    transport_node_queue_ptr out_queue;
+    io_reactor_ptr_t io_reactor;
+    cv_reactor_ptr_t cv_reactor;
+    node_transport_queue_ptr_t in_queue;
+    transport_node_queue_ptr_t out_queue;
 
     bfc::socket socket;
 

@@ -1,8 +1,11 @@
 #ifndef BFC_TUNNEL_LOGGER_HPP
 #define BFC_TUNNEL_LOGGER_HPP
 
+#include <cinttypes>
+#include <cstdarg>
 #include <cstdio>
 #include <fstream>
+#include <functional>
 #include <string>
 #include <ctime>
 #include <chrono>
@@ -27,8 +30,8 @@ public:
     logger(const std::string& filename);
     ~logger();
 
-    void log(const char* message) const;
-    void flush() const;
+    void log(const char* message);
+    void flush();
 
     void set_logbit(uint64_t logbit);
     void clear_logbit(uint64_t logbit);
@@ -41,40 +44,87 @@ private:
     std::atomic_bool log_stdout = true;
 };
 
-template <typename... Args>
-void log(logger& logger, uint64_t logbit, const char* format, Args... args)
+namespace detail
 {
-    if ((logger.get_logbit() & logbit) != logbit)
+
+inline bool log_enabled(const logger& lg, uint64_t logbit)
+{
+    return (lg.get_logbit() & logbit) == logbit;
+}
+
+inline void log_line_and_maybe_flush(logger& lg, const char* message)
+{
+    lg.log(message);
+    if (lg.get_logbit() & (E_LOG_BIT_SHOULD_NOT_HAPPEN | E_LOG_BIT_CRITICAL | E_LOG_BIT_ERROR))
     {
-        return;
-    }
-
-    thread_local static char rawline[1024*512];
-    thread_local static char fmtline[1024*512];;
-
-    auto now = std::chrono::system_clock::now();
-    auto now_ms = std::chrono::duration_cast<std::chrono::milliseconds>(now.time_since_epoch()).count();
-    auto now_s  = now_ms / 1000;
-    char timestamp[64];
-    struct tm tm;
-    localtime_r(&now_s, &tm);
-    auto res = strftime(timestamp, sizeof(timestamp), "%Y-%m-%d %H:%M:%S", &tm);
-    timestamp[res] = '\0';
-
-    res = snprintf(rawline, sizeof(rawline), format, args...);
-    rawline[res] = '\0';
-    res = snprintf(fmtline, sizeof(fmtline), "%s.%d %x08 %p %s", timestamp, now_ms%1000, logbit, std::this_thread::get_id(), rawline);
-    fmtline[res] = '\0';
-
-    logger.log(fmtline);
-    if (logger.get_logbit() & (E_LOG_BIT_SHOULD_NOT_HAPPEN|E_LOG_BIT_CRITICAL|E_LOG_BIT_ERROR))
-    {
-        logger.flush();
+        lg.flush();
     }
 }
 
-#define IF_LB(logbit) if ((logger.get_logbit() & logbit) == logbit)
+#if defined(__GNUC__) || defined(__clang__)
+#define BFC_TUNNEL_LOG_PRINTF_ATTR __attribute__((format(printf, 3, 4)))
+#else
+#define BFC_TUNNEL_LOG_PRINTF_ATTR
+#endif
 
-inline logger tlogger;
+BFC_TUNNEL_LOG_PRINTF_ATTR
+inline void log_with_prefix(logger& lg, uint64_t logbit, const char* format, ...)
+{
+    thread_local static char rawline[1024 * 512];
+    thread_local static char fmtline[1024 * 512];
+
+    auto now = std::chrono::system_clock::now();
+    auto now_ms = std::chrono::duration_cast<std::chrono::milliseconds>(now.time_since_epoch()).count();
+    auto now_s = now_ms / 1000;
+    char timestamp[64];
+    struct tm tm;
+    localtime_r(&now_s, &tm);
+    auto ts_len = strftime(timestamp, sizeof(timestamp), "%Y-%m-%d %H:%M:%S", &tm);
+    timestamp[ts_len] = '\0';
+
+    va_list ap;
+    va_start(ap, format);
+    const int raw_len = std::vsnprintf(rawline, sizeof(rawline), format, ap);
+    va_end(ap);
+    if (raw_len < 0)
+    {
+        rawline[0] = '\0';
+    }
+
+    const auto thr_hash = std::hash<std::thread::id>{}(std::this_thread::get_id());
+    std::snprintf(fmtline, sizeof(fmtline), "%s.%03d %08" PRIx64 " %zu %s", timestamp,
+                  static_cast<int>(now_ms % 1000), logbit, thr_hash, rawline);
+
+    log_line_and_maybe_flush(lg, fmtline);
+}
+
+#undef BFC_TUNNEL_LOG_PRINTF_ATTR
+
+} // namespace detail
+
+inline void log(logger& lg, uint64_t logbit, const char* format)
+{
+    if (!detail::log_enabled(lg, logbit))
+    {
+        return;
+    }
+    detail::log_line_and_maybe_flush(lg, format);
+}
+
+template <typename... Args>
+void log(logger& lg, uint64_t logbit, const char* format, Args... args)
+{
+    if (!detail::log_enabled(lg, logbit))
+    {
+        return;
+    }
+    detail::log_with_prefix(lg, logbit, format, args...);
+}
+
+#define IF_LB(logbit) if ((g_logger->get_logbit() & logbit) == logbit)
+
+inline std::unique_ptr<logger> g_logger;
 
 } // namespace bfc_tunnel
+
+#endif // BFC_TUNNEL_LOGGER_HPP

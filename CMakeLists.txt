@@ -39,12 +39,19 @@ target_include_directories(bfc_headers INTERFACE "${bfc_SOURCE_DIR}/src")
 add_library(bfc::bfc ALIAS bfc_headers)
 
 add_library(bfc_tunnel STATIC
+  src/bfc_tunnel/logger.cpp
+  src/bfc_tunnel/node.cpp
   src/bfc_tunnel/route_manager.cpp
+  src/bfc_tunnel/transport_plaintext.cpp
 )
 target_include_directories(bfc_tunnel PUBLIC
   "${CMAKE_CURRENT_SOURCE_DIR}/src"
 )
 target_link_libraries(bfc_tunnel PUBLIC bfc_headers)
+
+set(BFC_TUNNEL_COMPILE_WARNINGS
+    $<$<CXX_COMPILER_ID:GNU,Clang,AppleClang>:-Wall;-Wextra;-Wformat=2>)
+target_compile_options(bfc_tunnel PRIVATE ${BFC_TUNNEL_COMPILE_WARNINGS})
 
 enable_testing()
 
@@ -53,4 +60,5 @@ add_executable(bfc_tunnel_tests
   src/tests/gtestmain.cpp
 )
 target_link_libraries(bfc_tunnel_tests PRIVATE GTest::gtest bfc_tunnel)
+target_compile_options(bfc_tunnel_tests PRIVATE ${BFC_TUNNEL_COMPILE_WARNINGS})
 add_test(NAME bfc_tunnel_tests COMMAND bfc_tunnel_tests)

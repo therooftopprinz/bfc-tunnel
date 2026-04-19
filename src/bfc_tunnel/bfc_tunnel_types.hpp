@@ -14,11 +14,11 @@
 namespace bfc_tunnel
 {
 
-using reactor_cb_t = bfc::light_function<void()>;
-using cv_reactor = bfc::cv_reactor<reactor_cb_t>;
-using io_reactor = bfc::default_reactor<reactor_cb_t>;
-using io_reactor_ptr = std::shared_ptr<io_reactor>;
-using cv_reactor_ptr = std::shared_ptr<cv_reactor>;
+using reactor_cb_t = typename bfc::function_type_helper<64, void()>::type;
+using cv_reactor_t = bfc::cv_reactor<reactor_cb_t>;
+using io_reactor_t = bfc::default_reactor<reactor_cb_t>;
+using io_reactor_ptr_t = std::shared_ptr<io_reactor_t>;
+using cv_reactor_ptr_t = std::shared_ptr<cv_reactor_t>;
 
 struct node_id_s
 {
@@ -39,6 +39,7 @@ struct node_id_s
 struct node_io_pdu_s
 {
     sockaddr_storage addr;
+    socklen_t addr_len;
     bfc::buffer pdu;
 };
 
@@ -48,15 +49,15 @@ struct node_io_sdu_s
     bfc::buffer sdu;
 };
 
-using node_transport_queue_t = bfc::reactive_event_queue<node_io_pdu_s, bfc::light_function<void()>>;
-using transport_node_queue_t = bfc::reactive_event_queue<node_io_pdu_s, bfc::light_function<void()>>;
-using node_service_queue_t   = bfc::reactive_event_queue<node_io_sdu_s, bfc::light_function<void()>>;
-using service_node_queue_t   = bfc::reactive_event_queue<node_io_sdu_s, bfc::light_function<void()>>;
+using node_transport_queue_t = bfc::reactive_event_queue<node_io_pdu_s, reactor_cb_t>;
+using transport_node_queue_t = bfc::reactive_event_queue<node_io_pdu_s, reactor_cb_t>;
+using node_service_queue_t   = bfc::reactive_event_queue<node_io_sdu_s, reactor_cb_t>;
+using service_node_queue_t   = bfc::reactive_event_queue<node_io_sdu_s, reactor_cb_t>;
 
-using node_transport_queue_ptr = std::shared_ptr<node_transport_queue_t>;
-using transport_node_queue_ptr = std::shared_ptr<transport_node_queue_t>;
-using node_service_queue_ptr   = std::shared_ptr<node_service_queue_t>;
-using service_node_queue_ptr   = std::shared_ptr<service_node_queue_t>;
+using node_transport_queue_ptr_t = std::shared_ptr<node_transport_queue_t>;
+using transport_node_queue_ptr_t = std::shared_ptr<transport_node_queue_t>;
+using node_service_queue_ptr_t   = std::shared_ptr<node_service_queue_t>;
+using service_node_queue_ptr_t   = std::shared_ptr<service_node_queue_t>;
 
 } // namespace bfc_tunnel
 

@@ -1,5 +1,7 @@
 #include <bfc_tunnel/logger.hpp>
 
+#include <cstring>
+
 namespace bfc_tunnel
 {
 
@@ -13,12 +15,13 @@ logger::~logger()
     logfile.close();
 }
 
-void logger::log(const char* message) const
+void logger::log(const char* message)
 {
-    logfile << message << std::endl;
+    logfile.write(message, strlen(message));
+    logfile.put('\n');
 }
 
-void logger::flush() const
+void logger::flush()
 {
     logfile.flush();
 }

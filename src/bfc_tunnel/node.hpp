@@ -14,11 +14,11 @@ class node : public std::enable_shared_from_this<node>
 {
 public:
     node(
-        std::shared_ptr<cv_reactor> reactor,
-        node_transport_queue_ptr transport_out,
-        transport_node_queue_ptr transport_in,
-        node_service_queue_ptr service_out,
-        service_node_queue_ptr service_in
+        cv_reactor_ptr_t reactor,
+        node_transport_queue_ptr_t transport_out,
+        transport_node_queue_ptr_t transport_in,
+        node_service_queue_ptr_t service_out,
+        service_node_queue_ptr_t service_in
     );
     ~node();
 
@@ -29,11 +29,21 @@ private:
     void on_transport_in_queue_ready();
     void on_service_in_queue_ready();
 
-    cv_reactor_ptr cv_reactor;
-    node_transport_queue_ptr transport_out;
-    transport_node_queue_ptr transport_in;
-    node_service_queue_ptr service_out;
-    service_node_queue_ptr service_in;
+    void handle_transport_message(const header_s& header, const bfc::buffer_view& payload);
+    void handle_transport_message(const header_s& header, const id_request_s& payload);
+    void handle_transport_message(const header_s& header, const id_response_s& payload);
+    void handle_transport_message(const header_s& header, const link_info_s& payload);
+    void handle_transport_message(const header_s& header, const link_report_s& payload);
+    void handle_transport_message(const header_s& header, const route_announce_s& payload);
+    void handle_transport_message(const header_s& header, const hub_announce_s& payload);
+    void handle_transport_message(const header_s& header, const p2p_indication_s& payload);
+    void handle_transport_message(const header_s& header, const tunnel_data_s& payload);
+
+    cv_reactor_ptr_t cv_reactor;
+    node_transport_queue_ptr_t transport_out;
+    transport_node_queue_ptr_t transport_in;
+    node_service_queue_ptr_t service_out;
+    service_node_queue_ptr_t service_in;
 
     enum node_state_e
     {

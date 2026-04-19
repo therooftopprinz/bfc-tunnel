@@ -112,6 +112,9 @@ struct __attribute__((packed)) p2p_indication_s
     BEU16UA port;
 };
 
+struct __attribute__((packed)) tunnel_data_s
+{};
+
 inline bool validate_header(const bfc::buffer_view& buffer)
 {
     if (buffer.size() < sizeof(header_s))
@@ -162,6 +165,11 @@ inline bool validate_payload(const header_s& header, const T& payload)
     }
 
     return true;
+}
+
+inline bfc::buffer_view payload_view(const header_s* header)
+{
+    return bfc::buffer_view(header + 1, header->size);
 }
 
 } // namespace bfc_tunnel

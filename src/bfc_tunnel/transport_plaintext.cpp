@@ -1,14 +1,19 @@
+#include <bfc/socket.hpp>
 #include <bfc_tunnel/transport_plaintext.hpp>
 #include <bfc_tunnel/logger.hpp>
+
+#include <future>
+#include <algorithm>
+#include <unistd.h>
 
 namespace bfc_tunnel
 {
 
 transport_plaintext::transport_plaintext(
-    io_reactor_ptr io_reactor,
-    cv_reactor_ptr cv_reactor,
-    node_transport_queue_ptr in_queue,
-    transport_node_queue_ptr out_queue)
+    io_reactor_ptr_t io_reactor,
+    cv_reactor_ptr_t cv_reactor,
+    node_transport_queue_ptr_t in_queue,
+    transport_node_queue_ptr_t out_queue)
     : io_reactor(io_reactor)
     , cv_reactor(cv_reactor)
     , in_queue(in_queue)
@@ -16,8 +21,7 @@ transport_plaintext::transport_plaintext(
 {}
 
 transport_plaintext::~transport_plaintext()
-{
-}
+{}
 
 void transport_plaintext::initialize()
 {
@@ -27,7 +31,7 @@ void transport_plaintext::initialize()
                 auto t = w.lock();
                 if (!t)
                 {
-                    log(tlogger, E_LOG_BIT_SHOULD_NOT_HAPPEN, "transport_plaintext[%p]::initialize: Weak pointer expired!", nullptr);
+                    log(*g_logger, E_LOG_BIT_SHOULD_NOT_HAPPEN, "transport_plaintext[nullptr]::initialize: Weak pointer expired!");
                     return;
                 }
 
@@ -40,7 +44,7 @@ void transport_plaintext::initialize()
                             }
                             else
                             {
-                                log(tlogger, E_LOG_BIT_SHOULD_NOT_HAPPEN, "transport_plaintext[%p]::on_in_queue_ready: Weak pointer expired!", nullptr);
+                                log(*g_logger, E_LOG_BIT_SHOULD_NOT_HAPPEN, "transport_plaintext[nullptr]::on_in_queue_ready: Weak pointer expired!");
                             }
                         }
                     );
@@ -49,37 +53,37 @@ void transport_plaintext::initialize()
         );
 }
 
-void transport_plaintext::configure(const transport_config_s& config)
+void transport_plaintext::configure(const transport_plaintext_config_s& config)
 {
-    io_reactor.wake_up(
+    io_reactor->wake_up(
             [config, w = weak_from_this()]()
             {
                 auto t = w.lock();
                 if (!t)
                 {
-                    log(tlogger, E_LOG_BIT_SHOULD_NOT_HAPPEN, "transport_plaintext[%p]::configure: Weak pointer expired!", nullptr);
+                    log(*g_logger, E_LOG_BIT_SHOULD_NOT_HAPPEN, "transport_plaintext[nullptr]::configure: Weak pointer expired!");
                     return;
                 }
 
-                t->socket = bfc::socket::create_udp4();
-                if (!t->socket.is_valid())
+                t->socket = bfc::create_udp4();
+                if (0 > t->socket.fd())
                 {
-                    log(tlogger, E_LOG_BIT_ERROR, "transport_plaintext[%p]::configure: Failed to create socket! error=%d(%s)", t.get(), errno, strerror(errno));
+                    log(*g_logger, E_LOG_BIT_ERROR, "transport_plaintext[%p]::configure: Failed to create socket! error=%d(%s)", t.get(), errno, strerror(errno));
                     return;
                 }
                 auto bind_addr = bfc::ip4_port_to_sockaddr(config.address, config.port);
                 if (!t->socket.bind(bind_addr))
                 {
-                    log(tlogger, E_LOG_BIT_ERROR, "transport_plaintext[%p]::configure: Failed to bind socket! error=%d(%s)", t.get(), errno, strerror(errno));
+                    log(*g_logger, E_LOG_BIT_ERROR, "transport_plaintext[%p]::configure: Failed to bind socket! error=%d(%s)", t.get(), errno, strerror(errno));
                     return;
                 }
-                t->io_reactor->register_read_ready_handler(t->socket.get_fd(),
+                t->io_reactor->add_read_rdy(t->socket.fd(),
                     [w]()
                     {
                         auto t = w.lock();
                         if (!t)
                         {
-                            log(tlogger, E_LOG_BIT_SHOULD_NOT_HAPPEN, "transport_plaintext[%p]::on_recv_ready: Weak pointer expired!", nullptr);
+                            log(*g_logger, E_LOG_BIT_SHOULD_NOT_HAPPEN, "transport_plaintext[nullptr]::on_recv_ready: Weak pointer expired!");
                             return;
                         }
                         t->on_recv_ready();
@@ -101,29 +105,29 @@ void transport_plaintext::uninitialize()
     std::promise<void> cv_reactor_promise;
     std::promise<void> io_reactor_promise;
 
-    cv_reactor.wake_up(
+    cv_reactor->wake_up(
             [&cv_reactor_promise, w = weak_from_this()]()
             {
                 auto t = w.lock();
                 if (!t)
                 {
-                    log(tlogger, E_LOG_BIT_SHOULD_NOT_HAPPEN, "transport_plaintext[%p]::uninitialize: cv_reactor callback: Weak pointer expired!", nullptr);
+                    log(*g_logger, E_LOG_BIT_SHOULD_NOT_HAPPEN, "transport_plaintext[nullptr]::uninitialize: cv_reactor callback: Weak pointer expired!");
                     cv_reactor_promise.set_value();
                     return;
                 }
 
-                t->io_reactor->unregister_read_ready_handler(t->socket.get_fd());
-                t->socket.close();
+                t->io_reactor->rem_read_rdy(t->socket.fd());
+                t->socket = bfc::socket();
                 cv_reactor_promise.set_value();
             }
         );
-    io_reactor.wake_up(
+    io_reactor->wake_up(
             [&io_reactor_promise, w = weak_from_this()]()
             {
                 auto t = w.lock();
                 if (!t)
                 {
-                    log(tlogger, E_LOG_BIT_SHOULD_NOT_HAPPEN, "transport_plaintext[%p]::uninitialize: io_reactor callback: Weak pointer expired!", nullptr);
+                    log(*g_logger, E_LOG_BIT_SHOULD_NOT_HAPPEN, "transport_plaintext[nullptr]::uninitialize: io_reactor callback: Weak pointer expired!");
                     io_reactor_promise.set_value();
                     return;
                 }
@@ -136,21 +140,18 @@ void transport_plaintext::uninitialize()
     io_reactor_promise.get_future().wait();
 }
 
-void transport_plaintext::configure(const transport_config_s& config)
-{
-    this->config = config;
-    state = E_TRANSPORT_STATE_CONFIGURED;
-}
-
 void transport_plaintext::on_in_queue_ready()
 {
-    auto pdu = in_queue.pop();
-    if (pdu.empty())
+    auto ins = in_queue->pop();
+    if (ins.empty())
     {
         return;
     }
 
-    socket.send(pdu, 0, &pdu.addr, sizeof(pdu.addr));
+    for (auto& in : ins)
+    {
+        socket.send(in.pdu, 0, (sockaddr*) &in.addr, std::min(in.addr_len, (socklen_t) sizeof(in.addr)));
+    }
 }
 
 void transport_plaintext::on_recv_ready()
@@ -158,11 +159,12 @@ void transport_plaintext::on_recv_ready()
     sockaddr_storage addr;
     // todo: use buffer pool
     constexpr size_t MAX_PDU_SIZE = 1024*64;
-    bfc::buffer pdu(new uint8_t[MAX_PDU_SIZE], MAX_PDU_SIZE);
-    auto n = socket.recv(pdu, 0, &addr, sizeof(addr));
+    bfc::buffer pdu(new std::byte[MAX_PDU_SIZE], MAX_PDU_SIZE*sizeof(std::byte), [](const void* p) { delete[] (std::byte*) p; });
+    socklen_t addr_len = 0;
+    auto n = socket.recv(pdu, 0, (sockaddr*) &addr, &addr_len);
     if (n > 0)
     {
-        out_queue.push(node_io_pdu_s{addr, std::move(pdu)});
+        out_queue->push(node_io_pdu_s{addr, addr_len, std::move(pdu)});
     }
 }
 

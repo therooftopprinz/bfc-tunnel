@@ -1,35 +1,80 @@
 # BFC Tunneling Protocol
 
-## 1 Core Concepts
+##  [Core] Core
+### [Core.Overview] Overview
+### [Core.Overview.Node] Node
+A **node** is one overlay participant identified by **NodeID** in the shared address space; it exchanges framed messages over **local** and/or **global** transport. **Hubs** are publicly reachable members that anchor the global mesh and coordinate NAT traversal.
 
-### 1.1 Overview
-* Extended star topology
-* Overlay network
-* Hub – publicly reachable nodes acting as default switches and NAT traversal helpers.
-* Member - Nodes connecting to the hub, members are not publicly reachable (or opted not to).
-* Hubs can connect each other to for an extended star.
-* Members can form P2P to other members in the overlay through hub assisted NAT-traversal.
-* Fields are network order unless specified.
+**Node attributes** are **H**, **A**, **L**, and **U** (Hub, Access, Local, Unassociated): public, NAT‑limited, local‑broadcast‑only, or disconnected reachability, as in the tables below.
 
-## 2 Message Framing
-| Type        | Field       | Description         |
-|-------------|-------------|---------------------|
-| **static data**                                 |
-| u8          | version     | Protocol Version    |
-| u8          | type        | Message  Type       |
-| u16         | net_id      | Network ID          |
-| u16         | ttl         | Time To Live        |
-| u16         | size        | Message Data Size   |
-| u128        | src         | Source Node ID      |
-| u128        | dst         | Destination Node ID |
-| **dynamic**                                     |
-| *Message Payload*                               |
+| Attribute | Name  | Description                |
+|----|--------------|----------------------------|
+| H  | Hub          | Publicly reachable nodes   |
+| A  | Access       | Nodes behind NAT           |
+| L  | Local        | Nodes with local broadcast |
+| U  | Unassociated | Nodes with no link         |
 
-### 2.1 Version
+**Valid node attribute combinations** are exactly those listed in the table. Each row names a **node kind** (shorthand built from **H**, **A**, **L**, and **U**).
+
+| Node | Local | Global |
+|------|-------|--------|
+| U    | no    | no     |
+| A    | no    | nat    |
+| H    | no    | public |
+| L    | yes   | no     |
+| LA   | yes   | nat    |
+| LH   | yes   | public |
+
+### [Core.Overview.Mesh] Mesh
+The overlay is organized as two complementary meshes. A local transport mesh is the set of nodes that can reach one another on local broadcast or similar local links. A global transport mesh is the wide-area fabric anchored by hubs (publicly reachable nodes) that interconnect NAT‑limited Access nodes across the internet. Hubs therefore serve as the NAT traversal coordinators for Access‑to‑Access paths so global legs can be established and maintained. Reachability and paths across these meshes are maintained with distance‑vector style updates, using split horizon and poison reverse to limit routing loops and propagate withdrawals cleanly.
+* Local transport mesh are formed by groups of locally reachable nodes.
+* Global transport mesh are formed by hubs.
+* Hubs acts as NAT traversal coordinator for A2A links.
+* Distance vector/Split Horizon + Poison Reverse
+
+### [Core.Overview.Transport] Transport
+**Local Transport**
+
+**Examples**
+*  **WiFi Injection** - BFC Tunnel Frame *(BTF)* sits at Data Frame Body with destination address set to broadcast. **Implementations**: *WInject-direct, wifibroadcast, WFB-NG*
+* **Zigbee and LoRa** - *BTF* sits at the PHY Payload (act as L2).
+* **SDR** - BTF will act as L2.
+
+**Global Transport**
+ - IPv4 or IPv6 
+
+## [Core.Framing] Framing
+### [Core.Framing.BTF] BFC Tunnel Frame
+| Type  | Field         | Description                    | Notes  |
+|-------|---------------|--------------------------------|--------|
+| `u8`  | `ttl`         | Time-to-live                   |        |
+| `u1`  | `security_en` | Security Enabled               |        |
+| `u1`  | `lb `         | Local Broadcast Message        |        |
+| `u6`  | `version`     | Protocol Version               |        |
+| `x`   | `mac`         | Source Node Id                 | [1,2]  |
+| `u4`  | `cipher_algo` | Cipher Algorithm               | [1]    |
+| `u4`  | `integ_algo`  | Integrity Protection Algorithm | [1]    |
+| `u8`  | `lb_domain`   | Local Broadcast Domain         | [2]    |
+| `u64` | `sn`          | Sequence Number                |        |
+| `u64` | `ts`          | Epoch Time Stamp Microsecond   |        |
+| `u32` | `src`         | Source NodeId                  |        |
+| `u32` | `dst`         | Destination NodeId             |        |
+| `u16` | `payload_len` | Payload Length                 |        |
+| `N`   | `payload`     | Payload                        |        |
+
+*Notes:*<br/>
+*1. `if set (security_en)`*<br/>
+*2. `x = mac_size(integ_algo)`*<br/>
+*3. `if set (lb)`*<br/>
+
+# Definition in progress
+------------------
+
+### 3.1.1 Version
 * Major Protocol Version.
 * Not compatible with other major version.
 
-### 2.2 Node ID
+### 3.1.2 Node ID
 Node ID is a 128-bit structure used to identify a node.
 Node ID is not reusable, it is discarded if the network/transport
 has changed (change udp endpoint).
@@ -242,3 +287,65 @@ Routing is how a node decides **where to send a framed message next** so it reac
 - **Poison reverse:** When split horizon would suppress that advertisement, the node **still** sends an update on that link, but with **`metric`** set to an **unreachable** sentinel (implementation-defined maximum; receivers treat it as “not viable via this announcer on this path”). The neighbor then drops the stale path through you at once instead of waiting for timeouts.
 
 Together, distance-vector updates plus split horizon with poison reverse are the usual way to keep **`ROUTE_ANNOUNCE`** propagation convergent on hub/member meshes without requiring a global link-state database.
+
+## 2 Basic  Security
+### 2.1 Key Exchange
+```mermaid
+sequenceDiagram
+title Key Exchange
+     
+  participant A as Alice
+  participant B as Bob
+
+  Note over A: known: a = Alice's Private Key
+  Note over B: known: A = Alice's Public Key
+  Note over B: known: b = Bob's Private Key
+  Note over A: known: B = Bob's Public Key
+
+  Note over A: e = Alice's Private Ephemeral Key
+  Note over B: f = Bob's Private Ephemeral Key
+
+  A -->> B: Msg1(E)
+  Note over B: E = Alice's Public Ephemeral Key
+  
+  Note over A: Aes = DH(e, B) # eS
+  Note over B: Bes = DH(E, b) # Es
+  Note over A,B: Aes == Bes == es
+
+  Note over A: Ass = DH(a, B) # sS
+  Note over B: Bss = DH(A, b) # Ss
+  Note over A,B: Ass == Bss == ss
+
+  B -->> A: Msg2(F)
+  Note over A: F = Bob's Public Ephemeral Key
+  
+  Note over A: Aee = DH(e, F) # eE
+  Note over B: Bee = DH(E, f) # Ee
+  Note over A,B: Aee == Bee == ee
+
+  Note over A: Bse = DH(a, F) # sE
+  Note over B: Ase = DH(A, f) # Se
+  Note over A,B: Ase == Bse == se
+
+  Note over B: Bck0 = HASH(B)
+  Note over A: Ack0 = HASH(B)
+  Note over A,B: Ack0 == Bck0 == ck0
+
+  Note over B: Bck1 = MixKey(Bck0, Bes)
+  Note over A: Ack1 = MixKey(Ack0, Aes)
+  Note over A,B: Ack1 == Bck1 == ck1
+
+  Note over B: Bck2 = MixKey(Bck1, Bss)
+  Note over A: Ack2 = MixKey(Ack1, Ass)
+  Note over A,B: Ack2 == Bck2 == ck2
+
+  Note over B: Bck3 = MixKey(Bck2, Bee)
+  Note over A: Ack3 = MixKey(Ack2, Aee)
+  Note over A,B: Ack3 == Bck3 == ck3
+
+  Note over B: Bck4 = MixKey(Bck3, Bse)
+  Note over A: Ack4 = MixKey(Ack3, Ase)
+  Note over A,B: Ack4 == Bck4 == ck4
+
+  Note over A,B: ks, kr = HKDF(ck4, 0, 2)
+```

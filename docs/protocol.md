@@ -25,71 +25,90 @@ A **node** is one overlay participant identified by **NodeID** in the shared add
 | LA   | yes   | nat    |
 | LH   | yes   | public |
 
+### [Core.Overview.SpecialLocalNodes] Special Local Nodes
+Each **LA** or **LH** node creates a local broadcast domain, derives ephemeral confidentiality and integrity keys to protect traffic within that domain, and advertises itself as the domain host.
+
+Each **L** node SHOULD obtain confidentiality and integrity keys for every domain it can observe, retrieving them from the corresponding domain host using ordinary unicast routing.
+
+During bootstrap, an **L** node attempts to establish a secured unicast association with every visible peer. The first peer that can route toward the domain host forwards the initial key request. An **L** node MAY skip the request when the needed confidentiality and integrity keys are already present in memory.
+
 ### [Core.Overview.Mesh] Mesh
-The overlay is organized as two complementary meshes. A local transport mesh is the set of nodes that can reach one another on local broadcast or similar local links. A global transport mesh is the wide-area fabric anchored by hubs (publicly reachable nodes) that interconnect NAT‑limited Access nodes across the internet. Hubs therefore serve as the NAT traversal coordinators for Access‑to‑Access paths so global legs can be established and maintained. Reachability and paths across these meshes are maintained with distance‑vector style updates, using split horizon and poison reverse to limit routing loops and propagate withdrawals cleanly.
-* Local transport mesh are formed by groups of locally reachable nodes.
-* Global transport mesh are formed by hubs.
-* Hubs acts as NAT traversal coordinator for A2A links.
-* Distance vector/Split Horizon + Poison Reverse
+The overlay is organized as two complementary meshes. The **local transport mesh** is the set of nodes that can reach one another on local broadcast or similar local links. The **global transport mesh** is the wide-area fabric anchored by hubs (publicly reachable nodes) that interconnect NAT‑limited Access nodes across the internet. Hubs therefore coordinate NAT traversal for Access‑to‑Access paths so global legs can be established and maintained. Reachability and paths across these meshes use distance‑vector style updates, with split horizon and poison reverse to limit routing loops and propagate withdrawals cleanly.
+
+* The local transport mesh groups nodes that are mutually reachable on local links.
+* The global transport mesh is anchored by hubs that interconnect remote members.
+* Hubs act as NAT traversal coordinators for Access‑to‑Access (A2A) links.
+* Routing updates follow a distance-vector model with split horizon and poison reverse.
 
 ### [Core.Overview.Transport] Transport
 **Local Transport**
 
+Local transport delivers **BFC Tunnel Frames (BTF)** between nodes that share a **local broadcast domain** (or an equivalent multicast or shared‑medium segment), forming the **local transport mesh** described above without traversing the global hub fabric. The protocol specifies **BTF** as the common unit on this leg; how it is wrapped—WLAN broadcast data frames, radio PHY payloads, UDP multicast, and so on—is **link‑specific** and left to the implementation, while **BTF** fields such as **`lb`**, **`lb_domain`**, **`ttl`**, and **`src`/`dst`** carry the same overlay meaning regardless of the underlying medium.
+ 
 **Examples**
-*  **WiFi Injection** - BFC Tunnel Frame *(BTF)* sits at Data Frame Body with destination address set to broadcast. **Implementations**: *WInject-direct, wifibroadcast, WFB-NG*
-* **Zigbee and LoRa** - *BTF* sits at the PHY Payload (act as L2).
-* **SDR** - BTF will act as L2.
+* **WiFi injection** — the **BTF** occupies the 802.11 data frame body with the destination address set to broadcast. **Implementations** include *WInject-direct*, *wifibroadcast*, and *WFB-NG*.
+* **SDR, Zigbee, and LoRa** — **BTF** is carried as the PHY payload (L2-equivalent). Radio management uses BTP RRC or manual configuration (implementation-defined).
+* **UDP multicast** — **BTF** is the UDP payload. Multicast group and port are implementation-defined.
 
 **Global Transport**
- - IPv4 or IPv6 
+
+Global transport delivers **BFC Tunnel Frames (BTF)** across the **global transport mesh**: the wide-area fabric where **Hub** nodes are publicly reachable and **Access** nodes attach from behind NAT. The outer network is the ordinary Internet, using **IPv4** or **IPv6** endpoints and implementation-defined port or session binding (for example UDP endpoints associated with a node ID); **BTF** remains the inner unit whose fields carry the same overlay meaning as on local links. **Hubs** anchor this mesh and coordinate NAT traversal so **Access‑to‑Access** paths can be established and maintained alongside hub‑terminated traffic.
 
 ## [Core.Framing] Framing
 ### [Core.Framing.BTF] BFC Tunnel Frame
-| Type  | Field         | Description                    | Notes  |
-|-------|---------------|--------------------------------|--------|
-| `u8`  | `ttl`         | Time-to-live                   |        |
-| `u1`  | `security_en` | Security Enabled               |        |
-| `u1`  | `lb `         | Local Broadcast Message        |        |
-| `u6`  | `version`     | Protocol Version               |        |
-| `x`   | `mac`         | Source Node Id                 | [1,2]  |
-| `u4`  | `cipher_algo` | Cipher Algorithm               | [1]    |
-| `u4`  | `integ_algo`  | Integrity Protection Algorithm | [1]    |
-| `u8`  | `lb_domain`   | Local Broadcast Domain         | [2]    |
-| `u64` | `sn`          | Sequence Number                |        |
-| `u64` | `ts`          | Epoch Time Stamp Microsecond   |        |
-| `u32` | `src`         | Source NodeId                  |        |
-| `u32` | `dst`         | Destination NodeId             |        |
-| `u16` | `payload_len` | Payload Length                 |        |
-| `N`   | `payload`     | Payload                        |        |
+| Size | Type  | Field         | Description                    | Notes  |
+|------|-------|---------------|--------------------------------|--------|
+| 1    | `u8`  | `ttl`         | Time-to-live                   |        |
+| -    | `u1`  | `security_en` | Security Enabled               |        |
+| -    | `u1`  | `lb `         | Local Broadcast Message        |        |
+| 1    | `u6`  | `version`     | Protocol Version               |        |
+| s(x) | `x`   | `mac`         | Source Node Id                 | [1,2]  |
+| -    | `u4`  | `conf_algo`   | Confidentiality Algorithm      | [1]    |
+| 1    | `u4`  | `integ_algo`  | Integrity Protection Algorithm | [1]    |
+| 1    | `u8`  | `lb_domain`   | Local Broadcast Domain         | [2]    |
+| 4    | `u32` | `sn`          | Sequence Number                |        |
+| 4    | `u32` | `ts`          | Epoch Second                   |        |
+| 4    | `u32` | `src`         | Source NodeId                  |        |
+| 4    | `u32` | `dst`         | Destination NodeId             |        |
+| 2    | `u8`  | `payload_type`| Payload Type                   |        |
+| N    | `u8[]`| `payload`     | Payload                        |        |
 
 *Notes:*<br/>
 *1. `if set (security_en)`*<br/>
 *2. `x = mac_size(integ_algo)`*<br/>
 *3. `if set (lb)`*<br/>
 
-# Definition in progress
+### [Core.Framing.BTF.fields] Fields
+
+**`ttl`** — Hop limit for overlay forwarding. Each relay that forwards the frame on the local or global mesh MUST decrement `ttl` (or apply an equivalent policy); if `ttl` reaches zero before delivery to `dst`, the frame MUST be dropped. This limits routing loops and excessive fan-out.
+
+**`security_en`** — When **1**, the frame includes **`cipher_algo`**, **`integ_algo`**, and a **`mac`** whose length is **`mac_size(integ_algo)`** (note *1*). When **0**, those fields are omitted and the payload is not protected by this framing’s cipher/MAC.
+
+**`lb`** — When **1**, the frame is a **local-broadcast** message: it is scoped to local transport and the **`lb_domain`** selector (note *3*). When **0**, the frame follows unicast delivery rules for `dst`.
+
+**`version`** — **Major** protocol version for this frame. Receivers MUST reject frames whose `version` does not match the implementation’s supported major version (major versions are not interoperable).
+
+**`mac`** — **Message authentication / integrity tag** over the authenticated portion of the frame, present only when **`security_en` = 1**; length **`x`** bytes with **`x = mac_size(integ_algo)`** (notes *1* and *2*). Receivers MUST verify `mac` before accepting the frame. *(The framing table’s “Source Node Id” label is the sender identity field **`src`**, not this tag.)*
+
+**`conf_algo`** — Code selecting the **confidentiality** algorithm for the protected payload; present only when **`security_en` = 1** (note *1*).
+
+**`integ_algo`** — Code selecting the **integrity** algorithm; defines **`mac`** length via **`mac_size(integ_algo)`** when **`security_en` = 1** (notes *1* and *2*).
+
+**`lb_domain`** — Selects which **local broadcast domain** this frame belongs to on local transport (see **Local Transport** and **Special Local Nodes** above). Each **LA** or **LH** node creates a domain and acts as its **domain host**; **L** nodes MAY observe multiple domains and therefore MUST use **`lb_domain`** to pick the correct per-domain keys when handling **`lb` = 1** traffic. When **`lb` = 1**, senders MUST set **`lb_domain`** to the identifier of the domain on which the frame is transmitted, and it MUST be consistent with link configuration and with keys distributed by that domain’s host. When **`security_en` = 1** on such a frame, confidentiality and integrity processing MUST use the key material for that **`lb_domain`**.
+
+**`sn`** — Sender sequence number for this `(src, dst)` (or implementation-defined scope). Used for deduplication, ordering, and replay control; monotonic assignment is RECOMMENDED within each scope.
+
+**`ts`** — Sender timestamp: **seconds** since the Unix epoch (`time_t` resolution), UTC or sender-local as long as all peers agree on interpretation for freshness checks.
+
+**`src`** — Overlay identity of the **sender**.
+
+**`dst`** — Overlay identity of the **intended recipient** for unicast frames.
+
+**`payload_type`** — Discriminator for the layout and meaning of **`payload`**
+**`payload`** — Variable-length octets interpreted according to **`payload_type`**.
+
+# WIP -IGNORE BELOW
 ------------------
-
-### 3.1.1 Version
-* Major Protocol Version.
-* Not compatible with other major version.
-
-### 3.1.2 Node ID
-Node ID is a 128-bit structure used to identify a node.
-Node ID is not reusable, it is discarded if the network/transport
-has changed (change udp endpoint).
-
-The overlay uses one **shared node-ID space** across the interconnected network:
-`domain`, `csprng`, and `ts` are all part of the same address (the domain is not a separate namespace beside the node ID).
-
-The `domain` field also defines an **implicit broadcast group** encoded in the address.
-To broadcast to all nodes in broadcast domain *D*, set the message’s destination node ID with `domain = D` and `ts = 0` (per the usual framing rules for `dst`).
-
-| Size | Field  | Description                     |
-|------|--------|---------------------------------|
-| 8    | domain | Broadcast Domain                |
-| 56   | csprng | Random                          |
-| 64   | ts     | Epoch Time Stamp in nanoseconds |
 
 ### 2.3 Message Types
 The `type` field in §2 framing is **4 bits** (`u4`); values below are the numeric codes for each payload layout in §3.

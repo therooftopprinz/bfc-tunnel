@@ -1,9 +1,18 @@
 # BFC Tunneling Protocol
 
 ##  [Core] Core
+
 ### [Core.Overview] Overview
+
+---
+
 ### [Core.Overview.Node] Node
+
+---
+
 A **node** is one overlay participant identified by **NodeID** in the shared address space; it exchanges framed messages over **local** and/or **global** transport. **Hubs** are publicly reachable members that anchor the global mesh and coordinate NAT traversal.
+
+---
 
 **Node attributes** are **H**, **A**, **L**, and **U** (Hub, Access, Local, Unassociated): public, NAT‑limited, local‑broadcast‑only, or disconnected reachability, as in the tables below.
 
@@ -13,6 +22,8 @@ A **node** is one overlay participant identified by **NodeID** in the shared add
 | A  | Access       | Nodes behind NAT           |
 | L  | Local        | Nodes with local broadcast |
 | U  | Unassociated | Nodes with no link         |
+
+---
 
 **Valid node attribute combinations** are exactly those listed in the table. Each row names a **node kind** (shorthand built from **H**, **A**, **L**, and **U**).
 
@@ -25,14 +36,12 @@ A **node** is one overlay participant identified by **NodeID** in the shared add
 | LA   | yes   | nat    |
 | LH   | yes   | public |
 
-### [Core.Overview.SpecialLocalNodes] Special Local Nodes
-Each **LA** or **LH** node creates a local broadcast domain, derives ephemeral confidentiality and integrity keys to protect traffic within that domain, and advertises itself as the domain host.
-
-Each **L** node SHOULD obtain confidentiality and integrity keys for every domain it can observe, retrieving them from the corresponding domain host using ordinary unicast routing.
-
-During bootstrap, an **L** node attempts to establish a secured unicast association with every visible peer. The first peer that can route toward the domain host forwards the initial key request. An **L** node MAY skip the request when the needed confidentiality and integrity keys are already present in memory.
+---
 
 ### [Core.Overview.Mesh] Mesh
+
+---
+
 The overlay is organized as two complementary meshes. The **local transport mesh** is the set of nodes that can reach one another on local broadcast or similar local links. The **global transport mesh** is the wide-area fabric anchored by hubs (publicly reachable nodes) that interconnect NAT‑limited Access nodes across the internet. Hubs therefore coordinate NAT traversal for Access‑to‑Access paths so global legs can be established and maintained. Reachability and paths across these meshes use distance‑vector style updates, with split horizon and poison reverse to limit routing loops and propagate withdrawals cleanly.
 
 * The local transport mesh groups nodes that are mutually reachable on local links.
@@ -40,74 +49,121 @@ The overlay is organized as two complementary meshes. The **local transport mesh
 * Hubs act as NAT traversal coordinators for Access‑to‑Access (A2A) links.
 * Routing updates follow a distance-vector model with split horizon and poison reverse.
 
+---
+
 ### [Core.Overview.Transport] Transport
+
+---
+
 **Local Transport**
 
-Local transport delivers **BFC Tunnel Frames (BTF)** between nodes that share a **local broadcast domain** (or an equivalent multicast or shared‑medium segment), forming the **local transport mesh** described above without traversing the global hub fabric. The protocol specifies **BTF** as the common unit on this leg; how it is wrapped—WLAN broadcast data frames, radio PHY payloads, UDP multicast, and so on—is **link‑specific** and left to the implementation, while **BTF** fields such as **`lb`**, **`lb_domain`**, **`ttl`**, and **`src`/`dst`** carry the same overlay meaning regardless of the underlying medium.
+Local transport exchanges **BFC Tunnel Frames (BTF)** between nodes with direct local reachability, creating the **local transport mesh** without crossing the global hub fabric. On this segment, **BTF** remains the canonical protocol unit; only the outer encapsulation (for example WLAN broadcast frames, radio PHY payloads, or UDP multicast) is **link-specific** and implementation-defined. Across all media, core **BTF** semantics are unchanged.
  
 **Examples**
 * **WiFi injection** — the **BTF** occupies the 802.11 data frame body with the destination address set to broadcast. **Implementations** include *WInject-direct*, *wifibroadcast*, and *WFB-NG*.
 * **SDR, Zigbee, and LoRa** — **BTF** is carried as the PHY payload (L2-equivalent). Radio management uses BTP RRC or manual configuration (implementation-defined).
 * **UDP multicast** — **BTF** is the UDP payload. Multicast group and port are implementation-defined.
-
+----
 **Global Transport**
 
-Global transport delivers **BFC Tunnel Frames (BTF)** across the **global transport mesh**: the wide-area fabric where **Hub** nodes are publicly reachable and **Access** nodes attach from behind NAT. The outer network is the ordinary Internet, using **IPv4** or **IPv6** endpoints and implementation-defined port or session binding (for example UDP endpoints associated with a node ID); **BTF** remains the inner unit whose fields carry the same overlay meaning as on local links. **Hubs** anchor this mesh and coordinate NAT traversal so **Access‑to‑Access** paths can be established and maintained alongside hub‑terminated traffic.
+Global transport delivers **BTF** across the **global transport mesh**: the wide-area fabric where **Hub** nodes are publicly reachable and **Access** nodes attach from behind NAT. The outer network is the ordinary Internet, using **IPv4** or **IPv6** endpoints and implementation-defined port or session binding (for example UDP endpoints associated with a node ID); **BTF** remains the inner unit whose fields carry the same overlay meaning as on local links. **Hubs** anchor this mesh and coordinate NAT traversal so **Access‑to‑Access** paths can be established and maintained alongside hub‑terminated traffic.
+
+---
 
 ## [Core.Framing] Framing
+
 ### [Core.Framing.BTF] BFC Tunnel Frame
 | Size | Type  | Field         | Description                    | Notes  |
 |------|-------|---------------|--------------------------------|--------|
+| 1    | `u1`  | `reserved`    | Reserved                       |        |
+| -    | `u5`  | `version`     | Protocol Version               |        |
+| -    | `u2`  | `frame_type`  | Frame Type                     |        |
+| 1    | `u8`  | `sec_ctx`     | Security Context               |        |
 | 1    | `u8`  | `ttl`         | Time-to-live                   |        |
-| -    | `u1`  | `security_en` | Security Enabled               |        |
-| -    | `u1`  | `lb `         | Local Broadcast Message        |        |
-| 1    | `u6`  | `version`     | Protocol Version               |        |
-| s(x) | `x`   | `mac`         | Source Node Id                 | [1,2]  |
-| -    | `u4`  | `conf_algo`   | Confidentiality Algorithm      | [1]    |
-| 1    | `u4`  | `integ_algo`  | Integrity Protection Algorithm | [1]    |
-| 1    | `u8`  | `lb_domain`   | Local Broadcast Domain         | [2]    |
+| 1    | `u4`  | `conf_algo`   | Confidentiality Algorithm      |        |
+| -    | `u4`  | `inte_algo`   | Integrity Protection Algorithm |        |
+| s(x) | `x`   | `mac`         | Message Authentication Code    | [1]    |
 | 4    | `u32` | `sn`          | Sequence Number                |        |
 | 4    | `u32` | `ts`          | Epoch Second                   |        |
 | 4    | `u32` | `src`         | Source NodeId                  |        |
 | 4    | `u32` | `dst`         | Destination NodeId             |        |
-| 2    | `u8`  | `payload_type`| Payload Type                   |        |
 | N    | `u8[]`| `payload`     | Payload                        |        |
 
 *Notes:*<br/>
-*1. `if set (security_en)`*<br/>
-*2. `x = mac_size(integ_algo)`*<br/>
-*3. `if set (lb)`*<br/>
+*1. `x = mac_size(integ_algo)`*<br/>
+
+---
+
+**Frame Types**
+
+Frame types include *Peer*, which is used in bootstrapping network configuration and security and is not routable; *Network*, which is used for routing and data delivery;**, which allows a node to pass a secured message through a peer when network security is not yet available; and Public, which is used for node beacon messages.
+
+| Value | Name              | Description |
+|-------|-------------------|-------------|
+| 0     | PEER              | Message intended for direct distination.|
+| 1     | NETWORK           | Message intended for the network.|
+| 2     | NETWORK_OVER_PEER | Message intended for the network delegated by a peer.|
+| 3     | PUBLIC            | Message intended for public. |
 
 ### [Core.Framing.BTF.fields] Fields
+Fields are encoded in network byte order (big-endian). Bit-fields that share a byte are packed most-significant-bit first as shown in the table.
 
-**`ttl`** — Hop limit for overlay forwarding. Each relay that forwards the frame on the local or global mesh MUST decrement `ttl` (or apply an equivalent policy); if `ttl` reaches zero before delivery to `dst`, the frame MUST be dropped. This limits routing loops and excessive fan-out.
+- `version` MUST match the negotiated protocol version.
+- `frame_type` selects the frame interpretation.
+- `sec_ctx` selects the active keying/material profile used to validate and decrypt the frame.
+- `ttl` is decremented by each forwarding hop, and frames reaching `ttl = 0` MUST be dropped.
+- `conf_algo` and `inte_algo` identify the confidentiality and integrity transforms for this frame.
+- `mac` length is derived from `inte_algo` (`mac_size(integ_algo)`).
+- `sn` and `ts` provide replay-window and freshness inputs.
+- `src` and `dst` are overlay Node IDs used for routing and policy checks.
+- `payload` frame payload.
 
-**`security_en`** — When **1**, the frame includes **`cipher_algo`**, **`integ_algo`**, and a **`mac`** whose length is **`mac_size(integ_algo)`** (note *1*). When **0**, those fields are omitted and the payload is not protected by this framing’s cipher/MAC.
+---
 
-**`lb`** — When **1**, the frame is a **local-broadcast** message: it is scoped to local transport and the **`lb_domain`** selector (note *3*). When **0**, the frame follows unicast delivery rules for `dst`.
+## [Core.Flows] Flows
 
-**`version`** — **Major** protocol version for this frame. Receivers MUST reject frames whose `version` does not match the implementation’s supported major version (major versions are not interoperable).
+### [Core.Flows.PeerLinkEstablishment] Peer Link Establishment
 
-**`mac`** — **Message authentication / integrity tag** over the authenticated portion of the frame, present only when **`security_en` = 1**; length **`x`** bytes with **`x = mac_size(integ_algo)`** (notes *1* and *2*). Receivers MUST verify `mac` before accepting the frame. *(The framing table’s “Source Node Id” label is the sender identity field **`src`**, not this tag.)*
+---
 
-**`conf_algo`** — Code selecting the **confidentiality** algorithm for the protected payload; present only when **`security_en` = 1** (note *1*).
+Each node in the mesh maintains public keys for all the other nodes in the mesh.
+It is used for key exchange to generate keys for peer security.  
 
-**`integ_algo`** — Code selecting the **integrity** algorithm; defines **`mac`** length via **`mac_size(integ_algo)`** when **`security_en` = 1** (notes *1* and *2*).
+```mermaid
+sequenceDiagram
+title Peer Link Establishment
 
-**`lb_domain`** — Selects which **local broadcast domain** this frame belongs to on local transport (see **Local Transport** and **Special Local Nodes** above). Each **LA** or **LH** node creates a domain and acts as its **domain host**; **L** nodes MAY observe multiple domains and therefore MUST use **`lb_domain`** to pick the correct per-domain keys when handling **`lb` = 1** traffic. When **`lb` = 1**, senders MUST set **`lb_domain`** to the identifier of the domain on which the frame is transmitted, and it MUST be consistent with link configuration and with keys distributed by that domain’s host. When **`security_en` = 1** on such a frame, confidentiality and integrity processing MUST use the key material for that **`lb_domain`**.
+A -->> B :  (PEER) MSG1
+B -->> A :  (PEER) MSG2
+Note Over A,B: Peer Security is now enabled
+```
 
-**`sn`** — Sender sequence number for this `(src, dst)` (or implementation-defined scope). Used for deduplication, ordering, and replay control; monotonic assignment is RECOMMENDED within each scope.
+---
 
-**`ts`** — Sender timestamp: **seconds** since the Unix epoch (`time_t` resolution), UTC or sender-local as long as all peers agree on interpretation for freshness checks.
+### [Core.Flows.NetworkLinkEstablishment] Network Link Establishment
 
-**`src`** — Overlay identity of the **sender**.
+---
 
-**`dst`** — Overlay identity of the **intended recipient** for unicast frames.
+```mermaid
+sequenceDiagram
+Participant A
+Participant B
+Participant C
 
-**`payload_type`** — Discriminator for the layout and meaning of **`payload`**
-**`payload`** — Variable-length octets interpreted according to **`payload_type`**.
+Note Over B,C: Network Security
+Note Over A,B: Peer Link Establishment
+Note Over A,B: Security is now enabled
+A -->> B : (PEER) GET_NETWORK_KEYS_REQUEST
+Note Over B: Shares Network Keys to A
+B -->> A : (PEER) GET_NETWORK_KEYS_RESPONSE
+Note Over A,B: Network Security is now enabled
+Note Over A,C: Network Security
+A -->> B : (NETWORK, A to C) TUNNEL_DATA
+B -->> C : (NETWORK, A to C) TUNNEL_DATA
+```
+---
 
-# WIP -IGNORE BELOW
+# WIP - IGNORE BELOW
 ------------------
 
 ### 2.3 Message Types
@@ -115,8 +171,6 @@ The `type` field in §2 framing is **4 bits** (`u4`); values below are the numer
 
 | Value | Name           | Description                                                                                                        |
 |-------|----------------|--------------------------------------------------------------------------------------------------------------------|
-| 0x00  | ID_REQUEST     | Member asks the hub for a node ID; payload `domain` and `flags` (§3.1).                                            |
-| 0x01  | ID_RESPONSE    | Hub assigns a node ID and returns it (plus echoed `flags`) to the member (§3.2).                                   |
 | 0x02  | LINK_INFO      | Per-link counters and sender timestamp; acts as a heartbeat; peer MUST reply at once with its own snapshot (§3.3). |
 | 0x03  | LINK_REPORT    | Derived link quality: timestamp and receive-drop estimate from peer `LINK_INFO` `snt_*` vs local `rcv_*` (§3.4).   |
 | 0x04  | ROUTE_ANNOUNCE | Reachability propagation: `origin` → next hop → `target` with announce sequence and path metric (§3.5).            |
@@ -125,42 +179,6 @@ The `type` field in §2 framing is **4 bits** (`u4`); values below are the numer
 | 0x07  | TUNNEL_DATA    | Encapsulated payload for the tunnel session (inner packet or stream data toward `dst`).                            |
 
 ## 3 Messages
-### 3.1 ID_REQUEST
-Sent to hub to request a node ID. Node ID is associated with its outer-network address.
-If the network address has changed, the node ID is invalidated.
-
-**Message Data**
-| Size | Field  | Description                                                                                       |
-|------|--------|---------------------------------------------------------------------------------------------------|
-| u64  | id     | Request ID (csprng), when the request is delegated this will be used to determine the return path |
-| u8   | domain | Broadcast Domain                                                                                  |
-| u8   | flags  | Flags                                                                                             |
-
-**Flags**
-| offset | Field       | Description        |
-|--------|-------------|--------------------|
-| 0      | is_hub      | Node is a hub      |
-| 1      | delegated   | Delegated request  |
-
-There are cases that a joining member only have an access to a node in the network.
-In this case, the joining member can connect and request id to its local neighbor node and sends a delegated request id to the hub.
-
-### 3.2 ID_RESPONSE
-Hub reply to `ID_REQUEST`. Carries the **assigned** overlay node ID for this member’s current outer UDP binding. The member MUST adopt `node_id` as its `src` (and in all subsequent framed messages) until the outer address changes, at which point the ID is invalidated per §2.2 / §3.1.
-
-**Message Data**
-| Size | Field   | Description       |
-|------|---------|-------------------|
-| u64  | id      | Response ID       |
-| u8   | status  | Status Code       |
-| u128 | node_id | Allocated node ID |
-
-**Status Code**
-| Value | Name   | Description                                                                                                |
-|-------|--------|-------------------------------------------------------------------------|
-| 0x00  | OK     | Node ID allocated.                                                      |
-| 0x01  | NO_NET | `ID_REQUEST` can't be delegated because the node is not in the network. |
-| 0xFF  | UNSPEC | Unspecified Error                                                       |
 
 ### 3.3 LINK_INFO
 Carries link status from the sender’s perspective: when the snapshot was taken and cumulative receive/send packet and byte counts on this direct link. Periodic `LINK_INFO` exchange (with the mandatory reply below) also serves as a **heartbeat**: implementations SHOULD treat prolonged absence of queries from the peer as link or peer loss, using a local timeout policy.

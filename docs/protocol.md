@@ -163,22 +163,145 @@ B -->> C : (NETWORK, A to C) TUNNEL_DATA
 ```
 ---
 
+## [Core.Messages] Mesages
+
+### [Core.Messages.MessageDefinition] Message Definition
+
+---
+
+**Beacon**
+
+```cum
+sequence beacon
+{
+    u32 node_id
+};
+```
+
+---
+
+**Msg1 and Msg2**
+```
+type key_t dynamic_array=256, type = u8  
+
+sequence msg1
+{
+    key_t ephemeral,
+    key_t signature
+};
+
+sequence msg2
+{
+    key_t ephemeral,
+    key_t signature
+};
+```
+
+---
+
+**Link Info and Link Report**
+```
+sequence link_info
+{
+    u64 sender_time_us,
+    u64 rcv_pkt,
+    u64 snt_pkt,
+    u64 rcv_byt,
+    u64 snt_byt
+};
+
+sequence link_report
+{
+    u64 sender_time_us,
+    u16 rx_drop_pct
+};
+```
+
+---
+
+**Route Announce**
+
+```
+sequence route_announce_entry
+{
+    u32 origin_node_id,
+    u32 next_node_id,
+    u32 target_node_id,
+    u16 path_metric
+};
+
+type route_announce_entries         type = route_announce_entry, dynamic_array = 256;
+
+sequence route_announce
+{
+    u16 announcement_number,
+    u16 current_page,
+    u16 total_page,
+    u8 flags,
+    route_announce_entries routes
+};
+```
+
+---
+
+**Hub Announce**
+
+```
+sequence hub_announce_entry
+{
+    u32 node_id
+
+};
+
+type hub_announce_entries dynamic_array = 256, type = route_announce_entry;
+
+sequence hub_announce
+{
+    u32 announcer_node_id,
+    u32 announcement_number,
+    u16 current_page,
+    u16 total_page,
+    u8 flags,
+    hub_announce_entries entries
+};
+```
+
+---
+
+
+```
+choice BTPMessage
+{
+    beacon,
+    msg1,
+    msg2,
+    link_info,
+    link_report,
+    route_announce,
+    hub_announce,
+    p2p_indication
+};
+
+```
+
 # WIP - IGNORE BELOW
 ------------------
 
-### 2.3 Message Types
-The `type` field in §2 framing is **4 bits** (`u4`); values below are the numeric codes for each payload layout in §3.
+### [Core.Messages.MessageTypes] Message Types
 
-| Value | Name           | Description                                                                                                        |
-|-------|----------------|--------------------------------------------------------------------------------------------------------------------|
-| 0x02  | LINK_INFO      | Per-link counters and sender timestamp; acts as a heartbeat; peer MUST reply at once with its own snapshot (§3.3). |
-| 0x03  | LINK_REPORT    | Derived link quality: timestamp and receive-drop estimate from peer `LINK_INFO` `snt_*` vs local `rcv_*` (§3.4).   |
-| 0x04  | ROUTE_ANNOUNCE | Reachability propagation: `origin` → next hop → `target` with announce sequence and path metric (§3.5).            |
-| 0x05  | HUB_ANNOUNCE   | Announces hub overlay identity to members and peer hubs so clients learn hub `NodeID` entries; layout §3.6.        |
-| 0x06  | P2P_INDICATION | Hub-assisted hole punching: reflexive public UDP endpoint for `origin` as seen toward `target` (§3.7).             |
-| 0x07  | TUNNEL_DATA    | Encapsulated payload for the tunnel session (inner packet or stream data toward `dst`).                            |
+---
 
-## 3 Messages
+| Value | Frame   | Name           | Description                                                                                                        |
+|-------|---------|----------------|--------------------------------------------------------------------------------------------------------------------|
+| 0x00  | PUBLIC  | BEACON         | Used to broadcast active NodeId                                                                                    |
+| 0x01  | PEER    | MSG1           | Used to send initiator's emphemeral key.                                                                           |
+| 0x02  | PEER    | MSG2           | Used to send responder's emphemeral key.                                                                           |
+| 0x03  | PEER    | LINK_INFO      | |
+| 0x04  | PEER    | LINK_REPORT    | |
+| 0x04  | NETWORK | ROUTE_ANNOUNCE | |
+| 0x05  | NETWORK | HUB_ANNOUNCE   | |
+| 0x06  | NETWORK | P2P_INDICATION | |
+| 0x07  | NETWORK | TUNNEL_DATA    | |
 
 ### 3.3 LINK_INFO
 Carries link status from the sender’s perspective: when the snapshot was taken and cumulative receive/send packet and byte counts on this direct link. Periodic `LINK_INFO` exchange (with the mandatory reply below) also serves as a **heartbeat**: implementations SHOULD treat prolonged absence of queries from the peer as link or peer loss, using a local timeout policy.

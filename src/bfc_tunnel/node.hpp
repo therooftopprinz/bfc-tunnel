@@ -36,7 +36,7 @@ private:
     void handle_transport_message(const header_s& header, const link_report_s& payload);
     void handle_transport_message(const header_s& header, const route_announce_s& payload);
     void handle_transport_message(const header_s& header, const hub_announce_s& payload);
-    void handle_transport_message(const header_s& header, const p2p_indication_s& payload);
+    void handle_transport_message(const header_s& header, const n2n_indication_s& payload);
     void handle_transport_message(const header_s& header, const tunnel_data_s& payload);
 
     cv_reactor_ptr_t cv_reactor;

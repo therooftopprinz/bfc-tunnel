@@ -10,7 +10,7 @@
 
 ---
 
-A **node** is one overlay participant identified by **NodeID** in the shared address space; it exchanges framed messages over **local** and/or **global** transport. **Hubs** are publicly reachable members that anchor the global mesh and coordinate NAT traversal.
+A **node** is one overlay participant identified by **NodeID** in the shared address space; it exchanges framed messages over **local** and/or **global** transport. **Hubs** are publicly reachable **bootstrap** nodes for the **global** transport mesh: **Access** nodes are configured with hub endpoints and use them for **initial** global attachment only (before they have any other global-transport peers).
 
 ---
 
@@ -42,12 +42,12 @@ A **node** is one overlay participant identified by **NodeID** in the shared add
 
 ---
 
-The overlay is organized as two complementary meshes. The **local transport mesh** is the set of nodes that can reach one another on local broadcast or similar local links. The **global transport mesh** is the wide-area fabric anchored by hubs (publicly reachable nodes) that interconnect NAT‑limited Access nodes across the internet. Hubs therefore coordinate NAT traversal for Access‑to‑Access paths so global legs can be established and maintained. Reachability and paths across these meshes use distance‑vector style updates, with split horizon and poison reverse to limit routing loops and propagate withdrawals cleanly.
+The overlay is organized as two complementary meshes. The **local transport mesh** is the set of nodes that can reach one another on local broadcast or similar local links. The **global transport mesh** is the wide-area Internet fabric. **Hubs** **bootstrap** that mesh: **Access** nodes may contact **only** configured hub endpoints for their **first** global-transport join. After a node has at least one working global path, other members—not only hubs—can relay overlay traffic and can help with **N2N** (*node-to-node transport availability*). **N2N** is the step that makes a direct outer transport path plausibly available (for example by exchanging reflexive addresses via `N2N_INDICATION` for UDP hole punching). It is **not** the same as **P2P peer-link establishment**: after N2N, peers still run the **P2P** keying flow (for example `MSG1` / `MSG2`) before peer security is in place. Hubs are the usual first **anchor** for N2N, but any peer with an established **global transport** relationship to both sides can forward or originate N2N assistance; once a member has a direct global link to another member, that peer can in turn act as an anchor for N2N toward further nodes. Reachability and paths across these meshes use distance‑vector style updates, with split horizon and poison reverse to limit routing loops and propagate withdrawals cleanly.
 
 * The local transport mesh groups nodes that are mutually reachable on local links.
-* The global transport mesh is anchored by hubs that interconnect remote members.
-* Hubs act as NAT traversal coordinators for Access‑to‑Access (A2A) links.
-* Routing updates follow a distance-vector model with split horizon and poison reverse.
+* The global transport mesh is bootstrapped through hubs; Access nodes attach globally via hub endpoints first.
+* **N2N** (`N2N_INDICATION`) arranges **transport** reachability; **P2P** still establishes the secured peer link afterward.
+* Hubs and other global-transport peers can coordinate NAT traversal and N2N; routing updates follow a distance-vector model with split horizon and poison reverse.
 
 ---
 
@@ -66,7 +66,7 @@ Local transport exchanges **BFC Tunnel Frames (BTF)** between nodes with direct 
 ----
 **Global Transport**
 
-Global transport delivers **BTF** across the **global transport mesh**: the wide-area fabric where **Hub** nodes are publicly reachable and **Access** nodes attach from behind NAT. The outer network is the ordinary Internet, using **IPv4** or **IPv6** endpoints and implementation-defined port or session binding (for example UDP endpoints associated with a node ID); **BTF** remains the inner unit whose fields carry the same overlay meaning as on local links. **Hubs** anchor this mesh and coordinate NAT traversal so **Access‑to‑Access** paths can be established and maintained alongside hub‑terminated traffic.
+Global transport delivers **BTF** across the **global transport mesh**: the wide-area fabric where **Hub** nodes are publicly reachable and **Access** nodes join via configured hub endpoints, then use the same mesh (and **N2N** / **P2P** as needed) to grow direct and relayed paths. The outer network is the ordinary Internet, using **IPv4** or **IPv6** endpoints and implementation-defined port or session binding (for example UDP endpoints associated with a node ID); **BTF** remains the inner unit whose fields carry the same overlay meaning as on local links. **Hubs** bootstrap the mesh; **N2N** and subsequent **P2P** peer-link steps extend **Access‑to‑Access** and member paths beyond the initial hub attachment.
 
 ---
 
@@ -273,13 +273,13 @@ sequence hub_announce
 choice BTPMessage
 {
     beacon,
-    msg1,
+    msg1,transport-0.peer-0.
     msg2,
     link_info,
     link_report,
     route_announce,
     hub_announce,
-    p2p_indication
+    n2n_indication
 };
 
 ```
@@ -300,7 +300,7 @@ choice BTPMessage
 | 0x04  | PEER    | LINK_REPORT    | |
 | 0x04  | NETWORK | ROUTE_ANNOUNCE | |
 | 0x05  | NETWORK | HUB_ANNOUNCE   | |
-| 0x06  | NETWORK | P2P_INDICATION | |
+| 0x06  | NETWORK | N2N_INDICATION | |
 | 0x07  | NETWORK | TUNNEL_DATA    | |
 
 ### 3.3 LINK_INFO
@@ -384,10 +384,12 @@ It may also be generated periodically by hubs.
 |------|----------|---------------------|
 | u128 | NodeID   | Node ID of the hub  |
 
-### 3.7 P2P_INDICATION
-Hub-assisted hole punching: indications relay each peer’s reflexive public endpoint (`hostv4`, `port`); how endpoints are probed or kept open is local to implementations.
+### 3.7 N2N_INDICATION
+**N2N** (*node-to-node transport availability*) is the message type used to exchange the reflexive public endpoints (`hostv4`, `port`) that each side needs for UDP hole punching—so the **outer transport** for a direct global leg can be attempted. It does **not** replace **P2P** peer-link establishment: after N2N supplies addresses, nodes still run the PEER security exchange (`MSG1` / `MSG2`, *Peer Link Establishment* above) to establish the peer-cryptographic link.
 
-`hostv4`/`port` are **`origin`’s** public UDP endpoint **as seen toward `target`** (what `target` uses to punch). Members SHOULD send them empty to their hub; the hub MUST set them from the observed UDP source (or an equivalent member binding) before relaying toward `target`. A hub as `origin` SHOULD set them to its published overlay endpoint (same as `HUB_ANNOUNCE` for that interface). After a member-originated indication, later hops may source UDP from a hub while the payload still carries the filled reflexive endpoint; relays forward non-empty hub-`origin` values unless policy replaces them.
+The first N2N exchange for an **Access** node is typically **anchored** at a **hub** (the bootstrap peer). Any member that already has **global transport** to both `origin` and `target` may relay or assist N2N in the same way, including a peer that only gained that role after its own **P2P** peer link was established. How endpoints are probed or keepalives are sent is implementation-defined.
+
+`hostv4`/`port` are **`origin`’s** public UDP endpoint **as seen toward `target`** (what `target` uses to punch). Members SHOULD send them empty to their assisting peer (often a hub); the relay MUST set them from the observed UDP source (or an equivalent member binding) before forwarding toward `target`. A hub as `origin` SHOULD set them to its published overlay endpoint (same as `HUB_ANNOUNCE` for that interface). After a member-originated indication, later hops may source UDP from a hub while the payload still carries the filled reflexive endpoint; relays forward non-empty hub-`origin` values unless policy replaces them.
 
 **Message Data**
 | Size | Field    | Description                                            |
@@ -406,10 +408,10 @@ sequenceDiagram
 
     Note over A,B: Member→hub: empty hostv4/port. Hub fills from observed UDP public endpoint, then relays.
 
-    A->>HA: P2P_INDICATION<br/>origin=A, target=B, empty hostv4/port
-    HA->>B: P2P_INDICATION<br/>origin=A, target=B, hub sets A public hostv4/port
-    B->>HB: P2P_INDICATION<br/>origin=B, target=A, empty hostv4/port
-    HB->>A: P2P_INDICATION<br/>origin=B, target=A, hub sets B public hostv4/port
+    A->>HA: N2N_INDICATION<br/>origin=A, target=B, empty hostv4/port
+    HA->>B: N2N_INDICATION<br/>origin=A, target=B, hub sets A public hostv4/port
+    B->>HB: N2N_INDICATION<br/>origin=B, target=A, empty hostv4/port
+    HB->>A: N2N_INDICATION<br/>origin=B, target=A, hub sets B public hostv4/port
 ```
 
 ## 4 Discovery
@@ -424,13 +426,13 @@ The hub replies with **`ID_RESPONSE`** (§3.2):
 on status **`OK`**, the member adopts the returned `node_id`; on **`NO_NET`**, a delegated request could not reach the network (§3.1). A non-**`OK`** **`ID_RESPONSE`** is the negative discovery path for that attempt: the member must not treat the overlay as having allocated a node ID until it receives **`OK`** and adopts the returned `node_id`.
 
 
-A member learns that the overlay **accepts its node ID** from that successful **`ID_RESPONSE` (`OK`)** after its **single** bootstrap **`ID_REQUEST`** to the chosen hub (§3.1–§3.2). The bootstrap hub’s **`HUB_ANNOUNCE`** lets the member learn other hubs’ node id and may open **direct outer UDP** toward them when needed (e.g. using `P2P_INDICATION` for hole punching).
+A member learns that the overlay **accepts its node ID** from that successful **`ID_RESPONSE` (`OK`)** after its **single** bootstrap **`ID_REQUEST`** to the chosen hub (§3.1–§3.2). The bootstrap hub’s **`HUB_ANNOUNCE`** lets the member learn other hubs’ node id and may open **direct outer UDP** toward them when needed (e.g. using `N2N_INDICATION` before **P2P** peer-link establishment).
 
 Across interconnected hubs, **no two active nodes share the same full node ID**; hub coordination is part of making “who is this ID?” consistent network-wide.
 
-### 4.2 P2P endpoint discovery
+### 4.2 N2N endpoint discovery
 
-`P2P_INDICATION` gives each side the peer’s reflexive public `(hostv4, port)` (§3.7)—the outer UDP addresses used for hole punching. Hubs fill or relay those values; probes and keepalives are implementation-defined.
+`N2N_INDICATION` gives each side the peer’s reflexive public `(hostv4, port)` (§3.7)—the outer UDP addresses used to attempt a direct path. Assisting peers (typically hubs on first connect) fill or relay those values; probes and keepalives are implementation-defined. This step enables **transport**; **P2P** keying follows separately.
 
 ## 5 Routing
 

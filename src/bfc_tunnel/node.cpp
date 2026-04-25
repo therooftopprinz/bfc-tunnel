@@ -114,8 +114,8 @@ void node::handle_transport_message(const header_s& header, const bfc::buffer_vi
         case E_MSG_TYPE_HUB_ANNOUNCE:
             handle_transport_message(header, *(hub_announce_s*) payload.data());
             break;
-        case E_MSG_TYPE_P2P_INDICATION:
-            handle_transport_message(header, *(p2p_indication_s*) payload.data());
+        case E_MSG_TYPE_N2N_INDICATION:
+            handle_transport_message(header, *(n2n_indication_s*) payload.data());
             break;
         case E_MSG_TYPE_TUNNEL_DATA:
             handle_transport_message(header, *(tunnel_data_s*) payload.data());
@@ -156,9 +156,9 @@ void node::handle_transport_message(const header_s& header, const hub_announce_s
     log(*g_logger, E_LOG_BIT_INFO, "node[%p]::handle_transport_message: Hub announce!", this);
 }
 
-void node::handle_transport_message(const header_s& header, const p2p_indication_s& payload)
+void node::handle_transport_message(const header_s& header, const n2n_indication_s& payload)
 {
-    log(*g_logger, E_LOG_BIT_INFO, "node[%p]::handle_transport_message: P2P indication!", this);
+    log(*g_logger, E_LOG_BIT_INFO, "node[%p]::handle_transport_message: N2N indication!", this);
 }
 
 void node::handle_transport_message(const header_s& header, const tunnel_data_s& payload)

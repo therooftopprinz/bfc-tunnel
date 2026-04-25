@@ -1,5 +1,5 @@
 #include <bfc/socket.hpp>
-#include <bfc_tunnel/transport_plaintext.hpp>
+#include <bfc_tunnel/transport/udp4_unicast_transport.hpp>
 #include <bfc_tunnel/logger.hpp>
 
 #include <future>
@@ -9,21 +9,21 @@
 namespace bfc_tunnel
 {
 
-transport_plaintext::transport_plaintext(
+udp4_unicast_transport::udp4_unicast_transport(
     io_reactor_ptr_t io_reactor,
     cv_reactor_ptr_t cv_reactor,
-    node_transport_queue_ptr_t in_queue,
-    transport_node_queue_ptr_t out_queue)
+    transport_in_queue_t in_queue,
+    transport_out_queue_t out_queue)
     : io_reactor(io_reactor)
     , cv_reactor(cv_reactor)
     , in_queue(in_queue)
     , out_queue(out_queue)
 {}
 
-transport_plaintext::~transport_plaintext()
+udp4_unicast_transport::~udp4_unicast_transport()
 {}
 
-void transport_plaintext::initialize()
+void udp4_unicast_transport::initialize()
 {
     cv_reactor->wake_up(
             [w = weak_from_this()] ()
@@ -31,7 +31,7 @@ void transport_plaintext::initialize()
                 auto t = w.lock();
                 if (!t)
                 {
-                    log(*g_logger, E_LOG_BIT_SHOULD_NOT_HAPPEN, "transport_plaintext[nullptr]::initialize: Weak pointer expired!");
+                    log(*g_logger, E_LOG_BIT_SHOULD_NOT_HAPPEN, "udp4_unicast_transport[nullptr]::initialize: Weak pointer expired!");
                     return;
                 }
 
@@ -44,7 +44,7 @@ void transport_plaintext::initialize()
                             }
                             else
                             {
-                                log(*g_logger, E_LOG_BIT_SHOULD_NOT_HAPPEN, "transport_plaintext[nullptr]::on_in_queue_ready: Weak pointer expired!");
+                                log(*g_logger, E_LOG_BIT_SHOULD_NOT_HAPPEN, "udp4_unicast_transport[nullptr]::on_in_queue_ready: Weak pointer expired!");
                             }
                         }
                     );
@@ -53,7 +53,7 @@ void transport_plaintext::initialize()
         );
 }
 
-void transport_plaintext::configure(const transport_plaintext_config_s& config)
+void udp4_unicast_transport::configure(const udp4_unicast_transport_config_s& config)
 {
     io_reactor->wake_up(
             [config, w = weak_from_this()]()
@@ -61,20 +61,20 @@ void transport_plaintext::configure(const transport_plaintext_config_s& config)
                 auto t = w.lock();
                 if (!t)
                 {
-                    log(*g_logger, E_LOG_BIT_SHOULD_NOT_HAPPEN, "transport_plaintext[nullptr]::configure: Weak pointer expired!");
+                    log(*g_logger, E_LOG_BIT_SHOULD_NOT_HAPPEN, "udp4_unicast_transport[nullptr]::configure: Weak pointer expired!");
                     return;
                 }
 
                 t->socket = bfc::create_udp4();
                 if (0 > t->socket.fd())
                 {
-                    log(*g_logger, E_LOG_BIT_ERROR, "transport_plaintext[%p]::configure: Failed to create socket! error=%d(%s)", t.get(), errno, strerror(errno));
+                    log(*g_logger, E_LOG_BIT_ERROR, "udp4_unicast_transport[%p]::configure: Failed to create socket! error=%d(%s)", t.get(), errno, strerror(errno));
                     return;
                 }
                 auto bind_addr = bfc::ip4_port_to_sockaddr(config.address, config.port);
                 if (!t->socket.bind(bind_addr))
                 {
-                    log(*g_logger, E_LOG_BIT_ERROR, "transport_plaintext[%p]::configure: Failed to bind socket! error=%d(%s)", t.get(), errno, strerror(errno));
+                    log(*g_logger, E_LOG_BIT_ERROR, "udp4_unicast_transport[%p]::configure: Failed to bind socket! error=%d(%s)", t.get(), errno, strerror(errno));
                     return;
                 }
                 t->io_reactor->add_read_rdy(t->socket.fd(),
@@ -83,7 +83,7 @@ void transport_plaintext::configure(const transport_plaintext_config_s& config)
                         auto t = w.lock();
                         if (!t)
                         {
-                            log(*g_logger, E_LOG_BIT_SHOULD_NOT_HAPPEN, "transport_plaintext[nullptr]::on_recv_ready: Weak pointer expired!");
+                            log(*g_logger, E_LOG_BIT_SHOULD_NOT_HAPPEN, "udp4_unicast_transport[nullptr]::on_recv_ready: Weak pointer expired!");
                             return;
                         }
                         t->on_recv_ready();
@@ -95,7 +95,7 @@ void transport_plaintext::configure(const transport_plaintext_config_s& config)
 
 // contracts:
 // - io_reactor and cv_reactor are running if initialized or configured
-void transport_plaintext::uninitialize()
+void udp4_unicast_transport::uninitialize()
 {
     if (E_TRANSPORT_STATE_UNINITIALIZED == state)
     {
@@ -111,7 +111,7 @@ void transport_plaintext::uninitialize()
                 auto t = w.lock();
                 if (!t)
                 {
-                    log(*g_logger, E_LOG_BIT_SHOULD_NOT_HAPPEN, "transport_plaintext[nullptr]::uninitialize: cv_reactor callback: Weak pointer expired!");
+                    log(*g_logger, E_LOG_BIT_SHOULD_NOT_HAPPEN, "udp4_unicast_transport[nullptr]::uninitialize: cv_reactor callback: Weak pointer expired!");
                     cv_reactor_promise.set_value();
                     return;
                 }
@@ -127,7 +127,7 @@ void transport_plaintext::uninitialize()
                 auto t = w.lock();
                 if (!t)
                 {
-                    log(*g_logger, E_LOG_BIT_SHOULD_NOT_HAPPEN, "transport_plaintext[nullptr]::uninitialize: io_reactor callback: Weak pointer expired!");
+                    log(*g_logger, E_LOG_BIT_SHOULD_NOT_HAPPEN, "udp4_unicast_transport[nullptr]::uninitialize: io_reactor callback: Weak pointer expired!");
                     io_reactor_promise.set_value();
                     return;
                 }
@@ -140,7 +140,7 @@ void transport_plaintext::uninitialize()
     io_reactor_promise.get_future().wait();
 }
 
-void transport_plaintext::on_in_queue_ready()
+void udp4_unicast_transport::on_in_queue_ready()
 {
     auto ins = in_queue->pop();
     if (ins.empty())
@@ -154,7 +154,7 @@ void transport_plaintext::on_in_queue_ready()
     }
 }
 
-void transport_plaintext::on_recv_ready()
+void udp4_unicast_transport::on_recv_ready()
 {
     sockaddr_storage addr;
     // todo: use buffer pool

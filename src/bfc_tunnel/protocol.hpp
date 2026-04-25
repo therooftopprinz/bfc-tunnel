@@ -23,7 +23,7 @@ enum message_type_e
     E_MSG_TYPE_LINK_REPORT    = 0x03,
     E_MSG_TYPE_ROUTE_ANNOUNCE = 0x04,
     E_MSG_TYPE_HUB_ANNOUNCE   = 0x05,
-    E_MSG_TYPE_P2P_INDICATION = 0x06,
+    E_MSG_TYPE_N2N_INDICATION = 0x06,
     E_MSG_TYPE_TUNNEL_DATA    = 0x07,
 };
 
@@ -104,7 +104,7 @@ struct __attribute__((packed)) hub_announce_s
     using entry_type_t = hub_announce_entry_s;
 };
 
-struct __attribute__((packed)) p2p_indication_s
+struct __attribute__((packed)) n2n_indication_s
 {
     node_id_t origin;
     node_id_t target;

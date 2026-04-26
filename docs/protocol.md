@@ -10,7 +10,7 @@
 
 ---
 
-A **node** is one overlay participant identified by **NodeID** in the shared address space; it exchanges framed messages over **local** and/or **global** transport. **Hubs** are publicly reachable **bootstrap** nodes for the **global** transport mesh: **Access** nodes are configured with hub endpoints and use them for **initial** global attachment only (before they have any other global-transport peers).
+A **node** is an overlay participant identified by a **NodeID** in the shared address space. A node exchanges framed messages over **local** and/or **global** transport. **Hubs** are publicly reachable nodes in the global mesh. **Access** nodes are configured with hub endpoints for initial global attachment.
 
 ---
 
@@ -42,11 +42,11 @@ A **node** is one overlay participant identified by **NodeID** in the shared add
 
 ---
 
-The overlay is organized as two complementary meshes. The **local transport mesh** is the set of nodes that can reach one another on local broadcast or similar local links. The **global transport mesh** is the wide-area mesh reachable through ip networks. **Hubs** **bootstrap** that mesh: **Access** nodes may contact **only** configured hub endpoints for their **first** global-transport join. After a node has at least one working global path, other members—not only hubs—can relay overlay traffic and can help with **N2N** (*node-to-node transport availability*). **N2N** is the step that makes a direct outer transport path plausibly available (for example by exchanging reflexive addresses via `N2N_INDICATION` for UDP hole punching). It is **not** the same as **P2P peer-link establishment**: after N2N, peers still run the **P2P** keying flow (for example `MSG1` / `MSG2`) before peer security is in place. Hubs are the usual first **anchor** for N2N, but any peer with an established **global transport** relationship to both sides can forward or originate N2N assistance; once a member has a direct global link to another member, that peer can in turn act as an anchor for N2N toward further nodes. Reachability and paths across these meshes use distance‑vector style updates, with split horizon and poison reverse to limit routing loops and propagate withdrawals cleanly.
+The overlay is modeled as two complementary meshes. The **local transport mesh** consists of nodes that are mutually reachable over local broadcast or similar local links. The **global transport mesh** consists of wide-area reachability over IP networks. **Hubs** provide bootstrap entry into the global mesh: an **Access** node uses only configured hub endpoints for its initial global-transport join. After at least one global path is operational, non-hub members can relay overlay traffic and can assist **N2N** (*node-to-node transport availability*). **N2N** defines transport-path enablement only and is distinct from **P2P peer-link establishment**, which remains a separate security/keying phase. Hubs are the typical initial **anchor** for N2N, but any peer with established global transport relationships to both parties can relay or originate N2N assistance; a node that has established direct global connectivity to another member can in turn act as an anchor for additional members. Reachability and path propagation across both meshes follow a distance-vector model with split horizon and poison reverse to reduce loops and propagate withdrawals.
 
 * The local transport mesh groups nodes that are mutually reachable on local multicast/broadcast links.
 * The global transport mesh is bootstrapped through hubs; Access nodes attach globally via hub endpoints first.
-* **N2N** (`N2N_INDICATION`) arranges **transport** reachability; **P2P** still establishes the secured peer link afterward.
+* **N2N** arranges **transport** reachability; **P2P** remains a separate secured peer-link establishment phase.
 * Hubs and other global-transport peers can coordinate NAT traversal and N2N; routing updates follow a distance-vector model with split horizon and poison reverse.
 
 ---
@@ -55,18 +55,13 @@ The overlay is organized as two complementary meshes. The **local transport mesh
 
 ---
 
-**Local Transport**
+Local and global transport use different media but are equivalent for **BFC Tunnel Frame (BTF)** carriage and forwarding. **BTF** may traverse any reachable overlay path regardless of hop medium. Local links may apply link-specific outer encapsulation (for example, WLAN broadcast frames, radio PHY payloads, or UDP multicast) without changing **BTF** semantics. **N2N_INDICATION** is only for IP endpoint signaling (`hostv4`/`port`) during global UDP path setup; nodes on the same local broadcast domain can still have **N2N** transport availability without IP transport identity or **N2N_INDICATION** exchange.
 
-Local transport exchanges **BFC Tunnel Frames (BTF)** between nodes with direct local reachability, creating the **local transport mesh** without crossing the global hub fabric. On this segment, **BTF** remains the canonical protocol unit; only the outer encapsulation (for example WLAN broadcast frames, radio PHY payloads, or UDP multicast) is **link-specific** and implementation-defined. Across all media, core **BTF** semantics are unchanged.
- 
-**Examples**
-* **WiFi injection** — the **BTF** occupies the 802.11 data frame body with the destination address set to broadcast. **Implementations** include *WInject-direct*, *wifibroadcast*, and *WFB-NG*.
-* **SDR, Zigbee, and LoRa** — **BTF** is carried as the PHY payload (L2-equivalent). Radio management uses BTP RRC or manual configuration (implementation-defined).
-* **UDP multicast** — **BTF** is the UDP payload. Multicast group and port are implementation-defined.
-----
-**Global Transport**
-
-Global transport delivers **BTF** across the **global transport mesh**: the wide-area fabric where **Hub** nodes are publicly reachable and **Access** nodes join via configured hub endpoints, then use the same mesh (and **N2N** / **P2P** as needed) to grow direct and relayed paths. The outer network is the ordinary Internet, using **IPv4** or **IPv6** endpoints and implementation-defined port or session binding (for example UDP endpoints associated with a node ID); **BTF** remains the inner unit whose fields carry the same overlay meaning as on local links. **Hubs** bootstrap the mesh; **N2N** and subsequent **P2P** peer-link steps extend **Access‑to‑Access** and member paths beyond the initial hub attachment.
+* **Local Transport** carries **BTF** across the **local transport mesh** over local broadcast or equivalent shared-medium links.
+    * **WiFi injection** — the **BTF** occupies the 802.11 data frame body with the destination address set to broadcast. **Implementations** include *WInject-direct*, *wifibroadcast*, and *WFB-NG*.
+    * **SDR, Zigbee, and LoRa** — **BTF** is carried as the PHY payload (L2-equivalent). Radio management uses BTP RRC or manual configuration (implementation-defined).
+    * **UDP multicast** — **BTF** is the UDP payload. Multicast group and port are implementation-defined.
+* **Global Transport** carries **BTF** across the **global transport mesh** over ordinary Internet **IPv4** or **IPv6** paths.
 
 ---
 
@@ -100,7 +95,7 @@ Frame types include *Peer*, which is used in bootstrapping network configuration
 
 | Value | Name              | Description |
 |-------|-------------------|-------------|
-| 0     | PEER              | Message intended for direct distination.|
+| 0     | PEER              | Message intended for direct distination (i.e: TTL==1, next_hop==target)|
 | 1     | NETWORK           | Message intended for the network.|
 | 2     | NETWORK_OVER_PEER | Message intended for the network delegated by a peer.|
 | 3     | PUBLIC            | Message intended for public. |
@@ -272,6 +267,7 @@ choice BTPMessage
 | 0x02  | PEER    | MSG2           | Used to send responder's emphemeral key.                                                                           |
 | 0x03  | PEER    | LINK_INFO      | |
 | 0x04  | PEER    | LINK_REPORT    | |
+
 | 0x04  | NETWORK | ROUTE_ANNOUNCE | |
 | 0x05  | NETWORK | HUB_ANNOUNCE   | |
 | 0x06  | NETWORK | N2N_INDICATION | |
@@ -329,7 +325,7 @@ Typically sent soon after processing a peer `LINK_INFO` so the estimate referenc
 | u16  | metric   | Path Metric              |
 
 ### 3.7 N2N_INDICATION
-**N2N** (*node-to-node transport availability*) is the message type used to exchange the reflexive public endpoints (`hostv4`, `port`) that each side needs for UDP hole punching—so the **outer transport** for a direct global leg can be attempted. It does **not** replace **P2P** peer-link establishment: after N2N supplies addresses, nodes still run the PEER security exchange (`MSG1` / `MSG2`, *Peer Link Establishment* above) to establish the peer-cryptographic link.
+**N2N** (*node-to-node transport availability*) is a transport property that can exist on both local and global media. **N2N_INDICATION** is the IP-based signaling message used to exchange reflexive public endpoints (`hostv4`, `port`) for UDP hole punching, so the **outer transport** for a direct global leg can be attempted. It does **not** replace **P2P** peer-link establishment: after endpoint signaling, nodes still run the PEER security exchange (`MSG1` / `MSG2`, *Peer Link Establishment* above) to establish the peer-cryptographic link.
 
 The first N2N exchange for an **Access** node is typically **anchored** at a **hub** (the bootstrap peer). Any member that already has **global transport** to both `origin` and `target` may relay or assist N2N in the same way, including a peer that only gained that role after its own **P2P** peer link was established. How endpoints are probed or keepalives are sent is implementation-defined.
 

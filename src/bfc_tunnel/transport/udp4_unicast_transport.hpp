@@ -13,14 +13,13 @@ namespace bfc_tunnel
 
 struct udp4_unicast_transport_config_s
 {
-    bool is_hub;
     std::string bind_address;
     std::string peer_cache_file;
-    std::vector<udp4_unicast_transport_peer_s> peers;
+    std::vector<std::string> peers;
 };
 
 class udp4_unicast_transport :
-    public std::enable_shared_from_this<transport_plaintext>
+    public std::enable_shared_from_this<udp4_unicast_transport>
 {
 public:
     udp4_unicast_transport(

@@ -22,19 +22,4 @@ using cv_reactor_ptr_t = std::shared_ptr<cv_reactor_t>;
 
 } // namespace bfc_tunnel
 
-namespace std
-{
-template <>
-struct hash<bfc_tunnel::node_id_s>
-{
-    std::size_t operator()(const bfc_tunnel::node_id_s& id) const noexcept
-    {
-        std::size_t h = id.domain;
-        h ^= static_cast<std::size_t>(id.csprng) + 0x9e3779b9 + (h << 6) + (h >> 2);
-        h ^= static_cast<std::size_t>(id.ts) + 0x9e3779b9 + (h << 6) + (h >> 2);
-        return h;
-    }
-};
-} // namespace std
-
 #endif // BFC_TUNNEL_TYPES_HPP

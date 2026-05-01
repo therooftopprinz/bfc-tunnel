@@ -1,0 +1,71 @@
+type key_t type=u8, dynamic_array=256
+
+sequence beacon
+{
+    u32 node_id
+};
+
+sequence msg1
+{
+    key_t ephemeral,
+    key_t signature
+};
+
+sequence msg2
+{
+    key_t ephemeral,
+    key_t signature
+};
+
+sequence link_info
+{
+    u64 sender_time_us,
+    u64 rcv_pkt,
+    u64 snt_pkt,
+    u64 rcv_byt,
+    u64 snt_byt
+};
+
+sequence link_report
+{
+    u64 sender_time_us,
+    u16 rx_drop_pct
+};
+
+sequence route_announce_entry
+{
+    u32 origin_node_id,
+    u32 next_node_id,
+    u32 target_node_id,
+    u16 path_metric
+};
+
+type route_announce_entries type=route_announce_entry, dynamic_array=256
+
+sequence route_announce
+{
+    u16 announcement_number,
+    u16 current_page,
+    u16 total_page,
+    u8 flags,
+    route_announce_entries routes
+};
+
+sequence n2n_indication
+{
+    u32 origin,
+    u32 target,
+    u32 hostv4,
+    u16 port
+};
+
+choice BTPMessage
+{
+    beacon,
+    msg1,
+    msg2,
+    link_info,
+    link_report,
+    route_announce,
+    n2n_indication
+};

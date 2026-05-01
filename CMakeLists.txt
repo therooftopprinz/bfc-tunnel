@@ -38,12 +38,49 @@ add_library(bfc_headers INTERFACE)
 target_include_directories(bfc_headers INTERFACE "${bfc_SOURCE_DIR}/src")
 add_library(bfc::bfc ALIAS bfc_headers)
 
+set(BTPROTOCOL_INPUT "${CMAKE_CURRENT_SOURCE_DIR}/interface/btprotocol.cum")
+set(BTPROTOCOL_OUTPUT_DIR "${CMAKE_CURRENT_SOURCE_DIR}/src/bfc_tunnel/protocol")
+set(BTPROTOCOL_OUTPUT "${BTPROTOCOL_OUTPUT_DIR}/btprotocol.hpp")
+set(BTPROTOCOL_GENERATOR "" CACHE STRING "Generator command or absolute path for btprotocol.cum (e.g. cum)")
+
+if(BTPROTOCOL_GENERATOR)
+  if(IS_ABSOLUTE "${BTPROTOCOL_GENERATOR}")
+    set(BTPROTOCOL_GENERATOR_EXECUTABLE "${BTPROTOCOL_GENERATOR}")
+  else()
+    find_program(BTPROTOCOL_GENERATOR_EXECUTABLE NAMES "${BTPROTOCOL_GENERATOR}")
+  endif()
+else()
+  find_program(BTPROTOCOL_GENERATOR_EXECUTABLE NAMES cum)
+endif()
+
+if(NOT BTPROTOCOL_GENERATOR_EXECUTABLE)
+  message(FATAL_ERROR
+    "Could not find btprotocol generator executable.\n"
+    "Install it or configure CMake with:\n"
+    "  -DBTPROTOCOL_GENERATOR=/absolute/path/to/generator\n"
+    "or\n"
+    "  -DBTPROTOCOL_GENERATOR=<command-in-PATH>")
+endif()
+
+add_custom_command(
+  OUTPUT "${BTPROTOCOL_OUTPUT}"
+  COMMAND "${CMAKE_COMMAND}" -E make_directory "${BTPROTOCOL_OUTPUT_DIR}"
+  COMMAND "${BTPROTOCOL_GENERATOR_EXECUTABLE}" "${BTPROTOCOL_INPUT}" "${BTPROTOCOL_OUTPUT}"
+  DEPENDS "${BTPROTOCOL_INPUT}"
+  COMMENT "Generating btprotocol.hpp from btprotocol.cum"
+  VERBATIM
+)
+
+add_custom_target(generate_btprotocol DEPENDS "${BTPROTOCOL_OUTPUT}")
+
 add_library(bfc_tunnel STATIC
-  src/bfc_tunnel/logger.cpp
+  src/bfc_tunnel/transport/udp_unicast_transport.cpp
+  src/bfc_tunnel/utils/logger.cpp
   src/bfc_tunnel/node.cpp
   src/bfc_tunnel/route_manager.cpp
-  src/bfc_tunnel/transport_plaintext.cpp
 )
+add_dependencies(bfc_tunnel generate_btprotocol)
+target_sources(bfc_tunnel PRIVATE "${BTPROTOCOL_OUTPUT}")
 target_include_directories(bfc_tunnel PUBLIC
   "${CMAKE_CURRENT_SOURCE_DIR}/src"
 )

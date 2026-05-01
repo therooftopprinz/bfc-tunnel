@@ -77,11 +77,11 @@ Local and global transport use different media but are equivalent for **BFC Tunn
 | 1    | `u8`  | `ttl`         | Time-to-live                   |        |
 | 1    | `u4`  | `conf_algo`   | Confidentiality Algorithm      |        |
 | -    | `u4`  | `inte_algo`   | Integrity Protection Algorithm |        |
-| s(x) | `x`   | `mac`         | Message Authentication Code    | [1]    |
 | 4    | `u32` | `sn`          | Sequence Number                |        |
 | 4    | `u32` | `ts`          | Epoch Second                   |        |
 | 4    | `u32` | `src`         | Source NodeId                  |        |
 | 4    | `u32` | `dst`         | Destination NodeId             |        |
+| s(x) | `x`   | `mac`         | Message Authentication Code    | [1]    |
 | N    | `u8[]`| `payload`     | Payload                        |        |
 
 *Notes:*<br/>
@@ -158,7 +158,7 @@ B -->> C : (NETWORK, A to C) TUNNEL_DATA
 ```
 ---
 
-## [Core.Messages] Mesages
+## [Core.Messages] Messages
 
 ### [Core.Messages.MessageDefinition] Message Definition
 
@@ -168,93 +168,97 @@ B -->> C : (NETWORK, A to C) TUNNEL_DATA
 
 Sent on all transport types to identify active neighboring nodes.
 
-**Message Data**
-| Size | Field       | Description                                                                 |
-|------|-------------|-----------------------------------------------------------------------------|
-| u32  | node_id     |  |
+| Size | Type  | Field   |
+|------|-------|---------|
+| 4    | `u32` | node_id |
 
 ---
 
-**Msg1 and Msg2**
-```
-type key_t dynamic_array=256, type = u8  
+**Msg1**
 
-sequence msg1
-{
-    key_t ephemeral,
-    key_t signature
-};
+| Size | Type  | Field         |
+|------|-------|---------------|
+| 1    | `u8`  | ephemeral_len |
+| var  | `u8`  | ephemeral     |
+| 1    | `u8`  | signature_len |
+| var  | `u8`  | signature     |
 
-sequence msg2
-{
-    key_t ephemeral,
-    key_t signature
-};
-```
+**Msg2**
+
+| Size | Type | Field         |
+|------|------|---------------|
+| 1    | `u8` | ephemeral_len |
+| var  | `u8` | ephemeral     |
+| 1    | `u8` | signature_len |
+| var  | `u8` | signature     |
 
 ---
 
-**Link Info and Link Report**
-```
-sequence link_info
-{
-    u64 sender_time_us,
-    u64 rcv_pkt,
-    u64 snt_pkt,
-    u64 rcv_byt,
-    u64 snt_byt
-};
+**Link Info**
 
-sequence link_report
-{
-    u64 sender_time_us,
-    u16 rx_drop_pct
-};
-```
+| Size | Type  | Field          |
+|------|-------|----------------|
+| 8    | `u64` | sender_time_us |
+| 8    | `u64` | rcv_pkt        |
+| 8    | `u64` | snt_pkt        |
+| 8    | `u64` | rcv_byt        |
+| 8    | `u64` | snt_byt        |
+
+**Link Report**
+
+| Size | Type  | Field          |
+|------|-------|----------------|
+| 8    | `u64` | sender_time_us |
+| 2    | `u16` | rx_drop_pct    |
 
 ---
 
 **Route Announce**
 
-```
-sequence route_announce_entry
-{
-    u32 origin_node_id,
-    u32 next_node_id,
-    u32 target_node_id,
-    u16 path_metric
-};
+**Entry: `route_announce_entry`**
 
-type route_announce_entries         type = route_announce_entry, dynamic_array = 256;
+| Size | Type  | Field          |
+|------|-------|----------------|
+| 4    | `u32` | origin_node_id |
+| 4    | `u32` | next_node_id   |
+| 4    | `u32` | target_node_id |
+| 2    | `u16` | path_metric    |
 
-sequence route_announce
-{
-    u16 announcement_number,
-    u16 current_page,
-    u16 total_page,
-    u8 flags,
-    route_announce_entries routes
-};
-```
+**Message: `route_announce`**
+
+| Size | Type                                      | Field               |
+|------|-------------------------------------------|---------------------|
+| 2    | `u16`                                     | announcement_number |
+| 2    | `u16`                                     | current_page        |
+| 2    | `u16`                                     | total_page          |
+| 1    | `u8`                                      | flags               |
+| 1    | `u8`                                      | routes_len          |
+| var  | `route_announce_entry`                    | routes              |
 
 ---
 
-```
-choice BTPMessage
-{
-    beacon,
-    msg1,transport-0.peer-0.
-    msg2,
-    link_info,
-    link_report,
-    route_announce,
-    n2n_indication
-};
+**N2N Indication**
 
-```
+| Size | Type  | Field  |
+|------|-------|--------|
+| 4    | `u32` | origin |
+| 4    | `u32` | target |
+| 4    | `u32` | hostv4 |
+| 2    | `u16` | port   |
 
-# WIP - IGNORE BELOW
-------------------
+---
+
+**Choice: `BTPMessage`**
+
+| Variant | Description |
+|---------|-------------|
+| beacon | Neighbor discovery beacon. |
+| msg1 | Handshake/auth message 1. |
+| msg2 | Handshake/auth message 2. |
+| link_info | Link telemetry counters. |
+| link_report | Link quality report. |
+| route_announce | Route distribution message. |
+| n2n_indication | Node-to-node endpoint indication. |
 
 ### [Core.Messages.MessageTypes] Message Types
 
@@ -272,6 +276,9 @@ choice BTPMessage
 | 0x05  | NETWORK | HUB_ANNOUNCE   | |
 | 0x06  | NETWORK | N2N_INDICATION | |
 | 0x07  | NETWORK | TUNNEL_DATA    | |
+
+# WIP - IGNORE BELOW
+------------------
 
 ### 3.3 LINK_INFO
 Carries link status from the sender’s perspective: when the snapshot was taken and cumulative receive/send packet and byte counts on this direct link. Periodic `LINK_INFO` exchange (with the mandatory reply below) also serves as a **heartbeat**: implementations SHOULD treat prolonged absence of queries from the peer as link or peer loss, using a local timeout policy.
@@ -319,7 +326,6 @@ Typically sent soon after processing a peer `LINK_INFO` so the estimate referenc
 **Entry**
 | Size | Field    | Description              |
 |------|----------|--------------------------|
-| u128 | origin   | Origin                   |
 | u128 | next     | Next hop node            |
 | u128 | target   | Target node              |
 | u16  | metric   | Path Metric              |

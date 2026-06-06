@@ -1,4 +1,4 @@
-type key_t type=u8, dynamic_array=256
+using key_t = dynamic<u8, 256>;
 
 sequence beacon
 {
@@ -40,7 +40,7 @@ sequence route_announce_entry
     u16 path_metric
 };
 
-type route_announce_entries type=route_announce_entry, dynamic_array=256
+using route_announce_entries = dynamic<route_announce_entry, 256>;
 
 sequence route_announce
 {

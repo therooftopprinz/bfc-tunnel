@@ -1,6 +1,6 @@
 #include <bfc_tunnel/node.hpp>
-#include <bfc_tunnel/logger.hpp>
-#include <bfc_tunnel/protocol.hpp>
+#include <bfc_tunnel/utils/logger.hpp>
+#include <bfc_tunnel/protocol/btprotocol.hpp>
 
 namespace bfc_tunnel
 {

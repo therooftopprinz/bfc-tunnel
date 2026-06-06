@@ -10,7 +10,7 @@
 
 #include <bfc/buffer.hpp>
 
-#include <bfc_tunnel/safeint.hpp>
+#include <bfc_tunnel/utils/safeint.hpp>
 
 namespace bfc_tunnel
 {

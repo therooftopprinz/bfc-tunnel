@@ -20,7 +20,10 @@ enum transport_type_e
     E_TRANSPORT_TYPE_UDP_UNICAST,
 };
 
-struct transport_config_s
+struct transport_query_identity_s
+{};
+
+struct transport_identity_s
 {
     transport_type_e         type;
     std::string              address;
@@ -28,23 +31,44 @@ struct transport_config_s
 
 struct transport_data_s
 {
+    uint64_t id;
     bfc::buffer data;
 };
 
 struct transport4_data_s
 {
+    uint64_t id;
     sockaddr_in address;
     bfc::buffer data;
 };
 
 struct transport6_data_s
 {
+    uint64_t id;
     sockaddr_in6 address;
     bfc::buffer  data;
 };
 
-using transport_in_t  = std::variant<transport_data_s,   transport4_data_s, transport6_data_s>;
-using transport_out_t = std::variant<transport_config_s, transport4_data_s, transport6_data_s>;
+using sockaddr_t = std::variant<sockaddr_in, sockaddr_in6>;
+
+struct transport_delivery_failure
+{
+    uint64_t id;
+    sockaddr_t address;
+    int error;
+};
+
+using transport_in_t  = std::variant<
+    transport_query_identity_s,
+    transport_data_s,
+    transport4_data_s,
+    transport6_data_s>;
+using transport_out_t = std::variant<
+    transport_identity_s,
+    transport_data_s,
+    transport4_data_s,
+    transport6_data_s,
+    transport_delivery_failure>;
 
 using transport_in_queue_t  = bfc::reactive_event_queue<transport_in_t,  reactor_cb_t>;
 using transport_out_queue_t = bfc::reactive_event_queue<transport_out_t, reactor_cb_t>;

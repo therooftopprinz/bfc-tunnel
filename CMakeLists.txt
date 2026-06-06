@@ -11,6 +11,9 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 set(BFC_GIT_REPOSITORY "https://github.com/therooftopprinz/bfc.git")
 set(BFC_GIT_TAG "bd5e0cce68e8aea8adc8e995b1ad23361e425d29")
 
+set(CUM_GIT_REPOSITORY "https://github.com/therooftopprinz/cum.git")
+set(CUM_GIT_TAG "e0d04b66b3512e14bccfacb730dd7e3421957fe5")
+
 # GoogleTest — pin to main HEAD (see git ls-remote https://github.com/google/googletest.git HEAD).
 set(GOOGLETEST_GIT_REPOSITORY "https://github.com/google/googletest.git")
 set(GOOGLETEST_GIT_TAG "d72f9c8aea6817cdf1ca0ac10887f328de7f3da2")
@@ -27,6 +30,16 @@ if(NOT bfc_POPULATED)
 endif()
 
 FetchContent_Declare(
+  cum
+  GIT_REPOSITORY "${CUM_GIT_REPOSITORY}"
+  GIT_TAG "${CUM_GIT_TAG}"
+)
+FetchContent_GetProperties(cum)
+if(NOT cum_POPULATED)
+  FetchContent_Populate(cum)
+endif()
+
+FetchContent_Declare(
   googletest
   GIT_REPOSITORY "${GOOGLETEST_GIT_REPOSITORY}"
   GIT_TAG "${GOOGLETEST_GIT_TAG}"
@@ -37,6 +50,8 @@ FetchContent_MakeAvailable(googletest)
 add_library(bfc_headers INTERFACE)
 target_include_directories(bfc_headers INTERFACE "${bfc_SOURCE_DIR}/src")
 add_library(bfc::bfc ALIAS bfc_headers)
+
+set(CUM_CPP_GEN "${CMAKE_CURRENT_SOURCE_DIR}/cmake/cum-cpp-gen.sh")
 
 set(BTPROTOCOL_INPUT "${CMAKE_CURRENT_SOURCE_DIR}/interface/btprotocol.cum")
 set(BTPROTOCOL_OUTPUT_DIR "${CMAKE_CURRENT_SOURCE_DIR}/src/bfc_tunnel/protocol")
@@ -51,12 +66,15 @@ if(BTPROTOCOL_GENERATOR)
   endif()
 else()
   find_program(BTPROTOCOL_GENERATOR_EXECUTABLE NAMES cum)
+  if(NOT BTPROTOCOL_GENERATOR_EXECUTABLE AND EXISTS "${CUM_CPP_GEN}")
+    set(BTPROTOCOL_GENERATOR_EXECUTABLE "${CUM_CPP_GEN}")
+  endif()
 endif()
 
 if(NOT BTPROTOCOL_GENERATOR_EXECUTABLE)
   message(FATAL_ERROR
     "Could not find btprotocol generator executable.\n"
-    "Install it or configure CMake with:\n"
+    "Install cum or configure CMake with:\n"
     "  -DBTPROTOCOL_GENERATOR=/absolute/path/to/generator\n"
     "or\n"
     "  -DBTPROTOCOL_GENERATOR=<command-in-PATH>")
@@ -65,7 +83,8 @@ endif()
 add_custom_command(
   OUTPUT "${BTPROTOCOL_OUTPUT}"
   COMMAND "${CMAKE_COMMAND}" -E make_directory "${BTPROTOCOL_OUTPUT_DIR}"
-  COMMAND "${BTPROTOCOL_GENERATOR_EXECUTABLE}" "${BTPROTOCOL_INPUT}" "${BTPROTOCOL_OUTPUT}"
+  COMMAND "${CMAKE_COMMAND}" -E env "CUM_ROOT=${cum_SOURCE_DIR}"
+          "${BTPROTOCOL_GENERATOR_EXECUTABLE}" "${BTPROTOCOL_INPUT}" "${BTPROTOCOL_OUTPUT}"
   DEPENDS "${BTPROTOCOL_INPUT}"
   COMMENT "Generating btprotocol.hpp from btprotocol.cum"
   VERBATIM
@@ -83,6 +102,7 @@ add_dependencies(bfc_tunnel generate_btprotocol)
 target_sources(bfc_tunnel PRIVATE "${BTPROTOCOL_OUTPUT}")
 target_include_directories(bfc_tunnel PUBLIC
   "${CMAKE_CURRENT_SOURCE_DIR}/src"
+  "${cum_SOURCE_DIR}/target_cpp"
 )
 target_link_libraries(bfc_tunnel PUBLIC bfc_headers)
 

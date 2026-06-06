@@ -28,12 +28,6 @@ udp_unicast_transport::~udp_unicast_transport()
 
 void udp_unicast_transport::initialize()
 {
-    if (E_TRANSPORT_STATE_UNINITIALIZED != state)
-    {
-        log(*g_logger, E_LOG_BIT_ERROR, "udp_unicast_transport[%p]::initialize: Transport already initialized!", this);
-        return;
-    }
-
     io_reactor->wake_up(
         [w = weak_from_this()]()
         {
@@ -41,6 +35,12 @@ void udp_unicast_transport::initialize()
             if (!t)
             {
                 log(*g_logger, E_LOG_BIT_SHOULD_NOT_HAPPEN, "udp_unicast_transport[nullptr]::initialize: Weak pointer expired!");
+                return;
+            }
+
+            if (E_TRANSPORT_STATE_UNINITIALIZED != t->state)
+            {
+                log(*g_logger, E_LOG_BIT_ERROR, "udp_unicast_transport[%p]::initialize: Transport already initialized!", t.get());
                 return;
             }
 
@@ -66,12 +66,6 @@ void udp_unicast_transport::initialize()
 
 void udp_unicast_transport::configure(const udp_unicast_transport_config_s& config)
 {
-    if (E_TRANSPORT_STATE_INITIALIZED != state)
-    {
-        log(*g_logger, E_LOG_BIT_ERROR, "udp_unicast_transport[%p]::configure: Transport not initialized!", this);
-        return;
-    }
-
     io_reactor->wake_up(
         [config, w = weak_from_this()]()
         {
@@ -81,6 +75,15 @@ void udp_unicast_transport::configure(const udp_unicast_transport_config_s& conf
                 log(*g_logger, E_LOG_BIT_SHOULD_NOT_HAPPEN, "udp_unicast_transport[nullptr]::configure: Weak pointer expired!");
                 return;
             }
+
+            if (E_TRANSPORT_STATE_INITIALIZED != t->state)
+            {
+                log(*g_logger, E_LOG_BIT_ERROR, "udp_unicast_transport[%p]::configure: Transport not initialized!", t.get());
+                return;
+            }
+
+            t->sock = {};
+            t->config = {};
 
             t->is_v6 = std::accumulate(config.address.begin(), config.address.end(), 0, [](int acc, char c) { return acc + (c == ':'); }) > 1;
             if (t->is_v6)
@@ -143,7 +146,8 @@ void udp_unicast_transport::configure(const udp_unicast_transport_config_s& conf
                         t->on_sock_recv_ready();
                     }
                 );
-            t->transport_queue_pair->out.push(transport_config_s{
+            t->config = config;
+            t->transport_queue_pair->out.push(transport_identity_s{
                 E_TRANSPORT_TYPE_UDP_UNICAST,
                 config.address
             });
@@ -154,32 +158,59 @@ void udp_unicast_transport::configure(const udp_unicast_transport_config_s& conf
 
 void udp_unicast_transport::deinitialize()
 {
-    if (E_TRANSPORT_STATE_UNINITIALIZED == state)
-    {
-        return;
-    }
-
-    std::promise<void> reactor_promise;
+    auto done = std::make_shared<std::promise<void>>();
 
     io_reactor->wake_up(
-            [&reactor_promise, w = weak_from_this()]()
+            [w = weak_from_this(), done]()
             {
                 auto t = w.lock();
                 if (!t)
                 {
-                    log(*g_logger, E_LOG_BIT_SHOULD_NOT_HAPPEN, "udp_unicast_transport[nullptr]::uninitialize: io_reactor callback: Weak pointer expired!");
-                    reactor_promise.set_value();
+                    log(*g_logger, E_LOG_BIT_SHOULD_NOT_HAPPEN, "udp_unicast_transport[nullptr]::deinitialize: io_reactor callback: Weak pointer expired!");
+                    done->set_value();
                     return;
                 }
-                t->io_reactor->rem_read_rdy(t->sock.fd());
+
+                if (E_TRANSPORT_STATE_UNINITIALIZED == t->state.load())
+                {
+                    log(*g_logger, E_LOG_BIT_ERROR, "udp_unicast_transport[%p]::deinitialize: Transport already uninitialized!", t.get());
+                    done->set_value();
+                    return;
+                }
+
+                const int sock_fd = t->sock.fd();
+                const bool recv_registered = (E_TRANSPORT_STATE_CONFIGURED == t->state.load());
+
+                t->state.store(E_TRANSPORT_STATE_UNINITIALIZED);
                 t->cv_reactor->remove_read_rdy(t->transport_queue_pair->in);
-                t->sock = bfc::socket();
-                t->state = E_TRANSPORT_STATE_UNINITIALIZED;
-                reactor_promise.set_value();
+
+                auto finish = [w, done]()
+                {
+                    auto t = w.lock();
+                    if (!t)
+                    {
+                        log(*g_logger, E_LOG_BIT_SHOULD_NOT_HAPPEN, "udp_unicast_transport[nullptr]::deinitialize: finish: Weak pointer expired!");
+                        done->set_value();
+                        return;
+                    }
+
+                    t->sock = bfc::socket();
+                    t->config = {};
+                    done->set_value();
+                };
+
+                if (recv_registered && 0 <= sock_fd)
+                {
+                    t->io_reactor->rem_read_rdy(sock_fd, finish);
+                }
+                else
+                {
+                    finish();
+                }
             }
         );
 
-        reactor_promise.get_future().wait();
+    done->get_future().wait();
 }
 
 void udp_unicast_transport::on_in_queue_ready()
@@ -196,6 +227,20 @@ void udp_unicast_transport::on_in_queue_ready()
     }
 }
 
+void udp_unicast_transport::handle(const transport_query_identity_s& /*data*/)
+{
+    if (state.load() != E_TRANSPORT_STATE_CONFIGURED)
+    {
+        log(*g_logger, E_LOG_BIT_ERROR, "udp_unicast_transport[%p]::handle: Transport not configured!", this);
+        return;
+    }
+
+    transport_queue_pair->out.push(transport_identity_s{
+        E_TRANSPORT_TYPE_UDP_UNICAST,
+        config.address
+    });
+}
+
 void udp_unicast_transport::handle(const transport_data_s& /*data*/)
 {
     log(*g_logger, E_LOG_BIT_ERROR, "udp_unicast_transport[%p]::handle: Unsupported transport data!", this);
@@ -203,16 +248,43 @@ void udp_unicast_transport::handle(const transport_data_s& /*data*/)
 
 void udp_unicast_transport::handle(const transport4_data_s& data)
 {
-    sock.send(data.data, 0, (sockaddr*)&data.address, sizeof(data.address));
+    if (state.load() != E_TRANSPORT_STATE_CONFIGURED)
+    {
+        log(*g_logger, E_LOG_BIT_ERROR, "udp_unicast_transport[%p]::handle: Transport not configured!", this);
+        transport_queue_pair->out.push(transport_delivery_failure{data.id, data.address, EBADF});
+        return;
+    }
+    if (0 > sock.send(data.data, 0, (sockaddr*)&data.address, sizeof(data.address)))
+    {
+        log(*g_logger, E_LOG_BIT_ERROR, "udp_unicast_transport[%p]::handle: Failed to send data! error=%d(%s)", this, errno, strerror(errno));
+        transport_queue_pair->out.push(transport_delivery_failure{data.id, data.address, errno});
+        return;
+    }
 }
 
 void udp_unicast_transport::handle(const transport6_data_s& data)
 {
-    sock.send(data.data, 0, (sockaddr*)&data.address, sizeof(data.address));
+    if (state.load() != E_TRANSPORT_STATE_CONFIGURED)
+    {
+        log(*g_logger, E_LOG_BIT_ERROR, "udp_unicast_transport[%p]::handle: Transport not configured!", this);
+        transport_queue_pair->out.push(transport_delivery_failure{data.id, data.address, EBADF});
+        return;
+    }
+    if (0 > sock.send(data.data, 0, (sockaddr*)&data.address, sizeof(data.address)))
+    {
+        log(*g_logger, E_LOG_BIT_ERROR, "udp_unicast_transport[%p]::handle: Failed to send data! error=%d(%s)", this, errno, strerror(errno));
+        transport_queue_pair->out.push(transport_delivery_failure{data.id, data.address, errno});
+        return;
+    }
 }
 
 void udp_unicast_transport::on_sock_recv_ready()
 {
+    if (state.load() != E_TRANSPORT_STATE_CONFIGURED)
+    {
+        return;
+    }
+
     sockaddr_storage addr;
     // todo: use buffer pool
     constexpr size_t MAX_PDU_SIZE = 1024 * 64;
@@ -225,11 +297,11 @@ void udp_unicast_transport::on_sock_recv_ready()
         auto buffer = std::move(pdu).to_buffer();
         if (is_v6)
         {
-            transport_queue_pair->out.push(transport6_data_s{*(sockaddr_in6*)&addr, std::move(buffer)});
+            transport_queue_pair->out.push(transport6_data_s{0, *(sockaddr_in6*)&addr, std::move(buffer)});
         }
         else
         {
-            transport_queue_pair->out.push(transport4_data_s{*(sockaddr_in*)&addr, std::move(buffer)});
+            transport_queue_pair->out.push(transport4_data_s{0, *(sockaddr_in*)&addr, std::move(buffer)});
         }
     }
 }

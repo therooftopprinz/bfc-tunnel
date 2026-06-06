@@ -1,0 +1,557 @@
+// Generating for C++
+#ifndef __CUM_MSG_HPP__
+#define __CUM_MSG_HPP__
+#include "cum/cum.hpp"
+
+namespace cum
+{
+
+/***********************************************
+/
+/            Message Definitions
+/
+************************************************/
+
+using key_t = cum::vector<u8, 256>;
+struct beacon
+{
+    u32 node_id;
+};
+
+struct msg1
+{
+    key_t ephemeral;
+    key_t signature;
+};
+
+struct msg2
+{
+    key_t ephemeral;
+    key_t signature;
+};
+
+struct link_info
+{
+    u64 sender_time_us;
+    u64 rcv_pkt;
+    u64 snt_pkt;
+    u64 rcv_byt;
+    u64 snt_byt;
+};
+
+struct link_report
+{
+    u64 sender_time_us;
+    u16 rx_drop_pct;
+};
+
+struct route_announce_entry
+{
+    u32 origin_node_id;
+    u32 next_node_id;
+    u32 target_node_id;
+    u16 path_metric;
+};
+
+using route_announce_entries = cum::vector<route_announce_entry, 256>;
+struct route_announce
+{
+    u16 announcement_number;
+    u16 current_page;
+    u16 total_page;
+    u8 flags;
+    route_announce_entries routes;
+};
+
+struct n2n_indication
+{
+    u32 origin;
+    u32 target;
+    u32 hostv4;
+    u16 port;
+};
+
+using BTPMessage = std::variant<beacon,msg1,msg2,link_info,link_report,route_announce,n2n_indication>;
+/***********************************************
+/
+/            Codec Definitions
+/
+************************************************/
+
+inline void encode_per(const beacon& pIe, cum::per_codec_ctx& pCtx)
+{
+    using namespace cum;
+    encode_per(pIe.node_id, pCtx);
+}
+
+inline void decode_per(beacon& pIe, cum::per_codec_ctx& pCtx)
+{
+    using namespace cum;
+    decode_per(pIe.node_id, pCtx);
+}
+
+inline void str(const char* pName, const beacon& pIe, std::string& pCtx, bool pIsLast)
+{
+    using namespace cum;
+    if (!pName)
+    {
+        pCtx = pCtx + "{";
+    }
+    else
+    {
+        pCtx = pCtx + "\"" + pName + "\":{";
+    }
+    size_t nOptional = 0;
+    size_t nMandatory = 1;
+    str("node_id", pIe.node_id, pCtx, !(--nMandatory+nOptional));
+    pCtx = pCtx + "}";
+    if (!pIsLast)
+    {
+        pCtx += ",";
+    }
+}
+
+inline void encode_per(const msg1& pIe, cum::per_codec_ctx& pCtx)
+{
+    using namespace cum;
+    encode_per(pIe.ephemeral, pCtx);
+    encode_per(pIe.signature, pCtx);
+}
+
+inline void decode_per(msg1& pIe, cum::per_codec_ctx& pCtx)
+{
+    using namespace cum;
+    decode_per(pIe.ephemeral, pCtx);
+    decode_per(pIe.signature, pCtx);
+}
+
+inline void str(const char* pName, const msg1& pIe, std::string& pCtx, bool pIsLast)
+{
+    using namespace cum;
+    if (!pName)
+    {
+        pCtx = pCtx + "{";
+    }
+    else
+    {
+        pCtx = pCtx + "\"" + pName + "\":{";
+    }
+    size_t nOptional = 0;
+    size_t nMandatory = 2;
+    str("ephemeral", pIe.ephemeral, pCtx, !(--nMandatory+nOptional));
+    str("signature", pIe.signature, pCtx, !(--nMandatory+nOptional));
+    pCtx = pCtx + "}";
+    if (!pIsLast)
+    {
+        pCtx += ",";
+    }
+}
+
+inline void encode_per(const msg2& pIe, cum::per_codec_ctx& pCtx)
+{
+    using namespace cum;
+    encode_per(pIe.ephemeral, pCtx);
+    encode_per(pIe.signature, pCtx);
+}
+
+inline void decode_per(msg2& pIe, cum::per_codec_ctx& pCtx)
+{
+    using namespace cum;
+    decode_per(pIe.ephemeral, pCtx);
+    decode_per(pIe.signature, pCtx);
+}
+
+inline void str(const char* pName, const msg2& pIe, std::string& pCtx, bool pIsLast)
+{
+    using namespace cum;
+    if (!pName)
+    {
+        pCtx = pCtx + "{";
+    }
+    else
+    {
+        pCtx = pCtx + "\"" + pName + "\":{";
+    }
+    size_t nOptional = 0;
+    size_t nMandatory = 2;
+    str("ephemeral", pIe.ephemeral, pCtx, !(--nMandatory+nOptional));
+    str("signature", pIe.signature, pCtx, !(--nMandatory+nOptional));
+    pCtx = pCtx + "}";
+    if (!pIsLast)
+    {
+        pCtx += ",";
+    }
+}
+
+inline void encode_per(const link_info& pIe, cum::per_codec_ctx& pCtx)
+{
+    using namespace cum;
+    encode_per(pIe.sender_time_us, pCtx);
+    encode_per(pIe.rcv_pkt, pCtx);
+    encode_per(pIe.snt_pkt, pCtx);
+    encode_per(pIe.rcv_byt, pCtx);
+    encode_per(pIe.snt_byt, pCtx);
+}
+
+inline void decode_per(link_info& pIe, cum::per_codec_ctx& pCtx)
+{
+    using namespace cum;
+    decode_per(pIe.sender_time_us, pCtx);
+    decode_per(pIe.rcv_pkt, pCtx);
+    decode_per(pIe.snt_pkt, pCtx);
+    decode_per(pIe.rcv_byt, pCtx);
+    decode_per(pIe.snt_byt, pCtx);
+}
+
+inline void str(const char* pName, const link_info& pIe, std::string& pCtx, bool pIsLast)
+{
+    using namespace cum;
+    if (!pName)
+    {
+        pCtx = pCtx + "{";
+    }
+    else
+    {
+        pCtx = pCtx + "\"" + pName + "\":{";
+    }
+    size_t nOptional = 0;
+    size_t nMandatory = 5;
+    str("sender_time_us", pIe.sender_time_us, pCtx, !(--nMandatory+nOptional));
+    str("rcv_pkt", pIe.rcv_pkt, pCtx, !(--nMandatory+nOptional));
+    str("snt_pkt", pIe.snt_pkt, pCtx, !(--nMandatory+nOptional));
+    str("rcv_byt", pIe.rcv_byt, pCtx, !(--nMandatory+nOptional));
+    str("snt_byt", pIe.snt_byt, pCtx, !(--nMandatory+nOptional));
+    pCtx = pCtx + "}";
+    if (!pIsLast)
+    {
+        pCtx += ",";
+    }
+}
+
+inline void encode_per(const link_report& pIe, cum::per_codec_ctx& pCtx)
+{
+    using namespace cum;
+    encode_per(pIe.sender_time_us, pCtx);
+    encode_per(pIe.rx_drop_pct, pCtx);
+}
+
+inline void decode_per(link_report& pIe, cum::per_codec_ctx& pCtx)
+{
+    using namespace cum;
+    decode_per(pIe.sender_time_us, pCtx);
+    decode_per(pIe.rx_drop_pct, pCtx);
+}
+
+inline void str(const char* pName, const link_report& pIe, std::string& pCtx, bool pIsLast)
+{
+    using namespace cum;
+    if (!pName)
+    {
+        pCtx = pCtx + "{";
+    }
+    else
+    {
+        pCtx = pCtx + "\"" + pName + "\":{";
+    }
+    size_t nOptional = 0;
+    size_t nMandatory = 2;
+    str("sender_time_us", pIe.sender_time_us, pCtx, !(--nMandatory+nOptional));
+    str("rx_drop_pct", pIe.rx_drop_pct, pCtx, !(--nMandatory+nOptional));
+    pCtx = pCtx + "}";
+    if (!pIsLast)
+    {
+        pCtx += ",";
+    }
+}
+
+inline void encode_per(const route_announce_entry& pIe, cum::per_codec_ctx& pCtx)
+{
+    using namespace cum;
+    encode_per(pIe.origin_node_id, pCtx);
+    encode_per(pIe.next_node_id, pCtx);
+    encode_per(pIe.target_node_id, pCtx);
+    encode_per(pIe.path_metric, pCtx);
+}
+
+inline void decode_per(route_announce_entry& pIe, cum::per_codec_ctx& pCtx)
+{
+    using namespace cum;
+    decode_per(pIe.origin_node_id, pCtx);
+    decode_per(pIe.next_node_id, pCtx);
+    decode_per(pIe.target_node_id, pCtx);
+    decode_per(pIe.path_metric, pCtx);
+}
+
+inline void str(const char* pName, const route_announce_entry& pIe, std::string& pCtx, bool pIsLast)
+{
+    using namespace cum;
+    if (!pName)
+    {
+        pCtx = pCtx + "{";
+    }
+    else
+    {
+        pCtx = pCtx + "\"" + pName + "\":{";
+    }
+    size_t nOptional = 0;
+    size_t nMandatory = 4;
+    str("origin_node_id", pIe.origin_node_id, pCtx, !(--nMandatory+nOptional));
+    str("next_node_id", pIe.next_node_id, pCtx, !(--nMandatory+nOptional));
+    str("target_node_id", pIe.target_node_id, pCtx, !(--nMandatory+nOptional));
+    str("path_metric", pIe.path_metric, pCtx, !(--nMandatory+nOptional));
+    pCtx = pCtx + "}";
+    if (!pIsLast)
+    {
+        pCtx += ",";
+    }
+}
+
+inline void encode_per(const route_announce& pIe, cum::per_codec_ctx& pCtx)
+{
+    using namespace cum;
+    encode_per(pIe.announcement_number, pCtx);
+    encode_per(pIe.current_page, pCtx);
+    encode_per(pIe.total_page, pCtx);
+    encode_per(pIe.flags, pCtx);
+    encode_per(pIe.routes, pCtx);
+}
+
+inline void decode_per(route_announce& pIe, cum::per_codec_ctx& pCtx)
+{
+    using namespace cum;
+    decode_per(pIe.announcement_number, pCtx);
+    decode_per(pIe.current_page, pCtx);
+    decode_per(pIe.total_page, pCtx);
+    decode_per(pIe.flags, pCtx);
+    decode_per(pIe.routes, pCtx);
+}
+
+inline void str(const char* pName, const route_announce& pIe, std::string& pCtx, bool pIsLast)
+{
+    using namespace cum;
+    if (!pName)
+    {
+        pCtx = pCtx + "{";
+    }
+    else
+    {
+        pCtx = pCtx + "\"" + pName + "\":{";
+    }
+    size_t nOptional = 0;
+    size_t nMandatory = 5;
+    str("announcement_number", pIe.announcement_number, pCtx, !(--nMandatory+nOptional));
+    str("current_page", pIe.current_page, pCtx, !(--nMandatory+nOptional));
+    str("total_page", pIe.total_page, pCtx, !(--nMandatory+nOptional));
+    str("flags", pIe.flags, pCtx, !(--nMandatory+nOptional));
+    str("routes", pIe.routes, pCtx, !(--nMandatory+nOptional));
+    pCtx = pCtx + "}";
+    if (!pIsLast)
+    {
+        pCtx += ",";
+    }
+}
+
+inline void encode_per(const n2n_indication& pIe, cum::per_codec_ctx& pCtx)
+{
+    using namespace cum;
+    encode_per(pIe.origin, pCtx);
+    encode_per(pIe.target, pCtx);
+    encode_per(pIe.hostv4, pCtx);
+    encode_per(pIe.port, pCtx);
+}
+
+inline void decode_per(n2n_indication& pIe, cum::per_codec_ctx& pCtx)
+{
+    using namespace cum;
+    decode_per(pIe.origin, pCtx);
+    decode_per(pIe.target, pCtx);
+    decode_per(pIe.hostv4, pCtx);
+    decode_per(pIe.port, pCtx);
+}
+
+inline void str(const char* pName, const n2n_indication& pIe, std::string& pCtx, bool pIsLast)
+{
+    using namespace cum;
+    if (!pName)
+    {
+        pCtx = pCtx + "{";
+    }
+    else
+    {
+        pCtx = pCtx + "\"" + pName + "\":{";
+    }
+    size_t nOptional = 0;
+    size_t nMandatory = 4;
+    str("origin", pIe.origin, pCtx, !(--nMandatory+nOptional));
+    str("target", pIe.target, pCtx, !(--nMandatory+nOptional));
+    str("hostv4", pIe.hostv4, pCtx, !(--nMandatory+nOptional));
+    str("port", pIe.port, pCtx, !(--nMandatory+nOptional));
+    pCtx = pCtx + "}";
+    if (!pIsLast)
+    {
+        pCtx += ",";
+    }
+}
+
+inline void encode_per(const BTPMessage& pIe, cum::per_codec_ctx& pCtx)
+{
+    using namespace cum;
+    using TypeIndex = uint8_t;
+    TypeIndex type = pIe.index();
+    encode_per(type, pCtx);
+    if (0 == type)
+    {
+        encode_per(std::get<0>(pIe), pCtx);
+    }
+    else if (1 == type)
+    {
+        encode_per(std::get<1>(pIe), pCtx);
+    }
+    else if (2 == type)
+    {
+        encode_per(std::get<2>(pIe), pCtx);
+    }
+    else if (3 == type)
+    {
+        encode_per(std::get<3>(pIe), pCtx);
+    }
+    else if (4 == type)
+    {
+        encode_per(std::get<4>(pIe), pCtx);
+    }
+    else if (5 == type)
+    {
+        encode_per(std::get<5>(pIe), pCtx);
+    }
+    else if (6 == type)
+    {
+        encode_per(std::get<6>(pIe), pCtx);
+    }
+}
+
+inline void decode_per(BTPMessage& pIe, cum::per_codec_ctx& pCtx)
+{
+    using namespace cum;
+    using TypeIndex = uint8_t;
+    TypeIndex type;
+    decode_per(type, pCtx);
+    if (0 == type)
+    {
+        pIe = beacon();
+        decode_per(std::get<0>(pIe), pCtx);
+    }
+    else if (1 == type)
+    {
+        pIe = msg1();
+        decode_per(std::get<1>(pIe), pCtx);
+    }
+    else if (2 == type)
+    {
+        pIe = msg2();
+        decode_per(std::get<2>(pIe), pCtx);
+    }
+    else if (3 == type)
+    {
+        pIe = link_info();
+        decode_per(std::get<3>(pIe), pCtx);
+    }
+    else if (4 == type)
+    {
+        pIe = link_report();
+        decode_per(std::get<4>(pIe), pCtx);
+    }
+    else if (5 == type)
+    {
+        pIe = route_announce();
+        decode_per(std::get<5>(pIe), pCtx);
+    }
+    else if (6 == type)
+    {
+        pIe = n2n_indication();
+        decode_per(std::get<6>(pIe), pCtx);
+    }
+}
+
+inline void str(const char* pName, const BTPMessage& pIe, std::string& pCtx, bool pIsLast)
+{
+    using namespace cum;
+    using TypeIndex = uint8_t;
+    TypeIndex type = pIe.index();
+    if (0 == type)
+    {
+        if (pName)
+            pCtx += std::string(pName) + ":{";
+        else
+            pCtx += "{";
+        std::string name = "beacon";
+        str(name.c_str(), std::get<0>(pIe), pCtx, true);
+        pCtx += "}";
+    }
+    else if (1 == type)
+    {
+        if (pName)
+            pCtx += std::string(pName) + ":{";
+        else
+            pCtx += "{";
+        std::string name = "msg1";
+        str(name.c_str(), std::get<1>(pIe), pCtx, true);
+        pCtx += "}";
+    }
+    else if (2 == type)
+    {
+        if (pName)
+            pCtx += std::string(pName) + ":{";
+        else
+            pCtx += "{";
+        std::string name = "msg2";
+        str(name.c_str(), std::get<2>(pIe), pCtx, true);
+        pCtx += "}";
+    }
+    else if (3 == type)
+    {
+        if (pName)
+            pCtx += std::string(pName) + ":{";
+        else
+            pCtx += "{";
+        std::string name = "link_info";
+        str(name.c_str(), std::get<3>(pIe), pCtx, true);
+        pCtx += "}";
+    }
+    else if (4 == type)
+    {
+        if (pName)
+            pCtx += std::string(pName) + ":{";
+        else
+            pCtx += "{";
+        std::string name = "link_report";
+        str(name.c_str(), std::get<4>(pIe), pCtx, true);
+        pCtx += "}";
+    }
+    else if (5 == type)
+    {
+        if (pName)
+            pCtx += std::string(pName) + ":{";
+        else
+            pCtx += "{";
+        std::string name = "route_announce";
+        str(name.c_str(), std::get<5>(pIe), pCtx, true);
+        pCtx += "}";
+    }
+    else if (6 == type)
+    {
+        if (pName)
+            pCtx += std::string(pName) + ":{";
+        else
+            pCtx += "{";
+        std::string name = "n2n_indication";
+        str(name.c_str(), std::get<6>(pIe), pCtx, true);
+        pCtx += "}";
+    }
+    if (!pIsLast)
+    {
+        pCtx += ",";
+    }
+}
+
+} // namespace cum
+#endif //__CUM_MSG_HPP__

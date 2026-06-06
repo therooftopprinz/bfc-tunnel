@@ -14,31 +14,25 @@ namespace bfc_tunnel
 
 struct udp_unicast_transport_config_s
 {
-    std::string bind_address;
-    uint16_t bind_port;
-    std::vector<std::pair<std::string, uint16_t>> peers;
-    std::string peer_cache_file;
+    std::string address;
 };
 
-class udp_unicast_transport :
-    public std::enable_shared_from_this<udp_unicast_transport>
+class udp_unicast_transport : public std::enable_shared_from_this<udp_unicast_transport>
 {
 public:
     udp_unicast_transport(
-        io_reactor_ptr_t io_reactor,
-        cv_reactor_ptr_t cv_reactor,
-        transport_in_queue_t& in_queue,
-        transport_out_queue_t& out_queue
+        io_reactor_ptr_t io_reactor, cv_reactor_ptr_t cv_reactor,
+        transport_queue_pair_ptr_t transport_queue_pair
     );
     ~udp_unicast_transport();
 
     void initialize();
-    void uninitialize();
+    void deinitialize();
     void configure(const udp_unicast_transport_config_s& config);
 
 private:
     void on_in_queue_ready();
-    void on_recv_ready();
+    void on_sock_recv_ready();
 
     void handle(const transport_data_s& data);
     void handle(const transport4_data_s& data);
@@ -46,10 +40,9 @@ private:
 
     io_reactor_ptr_t io_reactor;
     cv_reactor_ptr_t cv_reactor;
-    transport_in_queue_t& in_queue;
-    transport_out_queue_t& out_queue;
+    transport_queue_pair_ptr_t transport_queue_pair;
 
-    bfc::socket socket;
+    bfc::socket sock;
     bool is_v6 = false;
 
     enum transport_state_e
@@ -59,7 +52,7 @@ private:
         E_TRANSPORT_STATE_CONFIGURED
     };
 
-    transport_state_e state;
+    transport_state_e state = E_TRANSPORT_STATE_UNINITIALIZED;
 };
 
 } // namespace bfc_tunnel

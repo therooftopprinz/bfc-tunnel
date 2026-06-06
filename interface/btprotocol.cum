@@ -2,19 +2,41 @@ using key_t = dynamic<u8, 256>;
 
 sequence beacon
 {
-    u32 node_id
+    u32 node_id;
 };
 
 sequence msg1
 {
-    key_t ephemeral,
-    key_t signature
+    u8 sec_ctx;
+    u8 confidentiality_algorithm;
+    u8 integrity_algorithm;
+    key_t ephemeral;
+    key_t signature;
 };
 
 sequence msg2
 {
-    key_t ephemeral,
-    key_t signature
+    key_t ephemeral;
+    key_t signature;
+};
+
+sequence network_key
+{
+    u8 sec_ctx;
+    key_t key;
+    u64 creation_time_us;
+    u16 duration_s;
+    u8 confidentiality_algorithm;
+    u8 integrity_algorithm;
+};
+
+using network_keys = dynamic<network_key, 256>;
+
+sequence exchange_network_keys
+{
+    u8 record_index;
+    u8 record_total;
+    network_keys keys;
 };
 
 sequence link_info
@@ -64,6 +86,7 @@ choice BTPMessage
     beacon,
     msg1,
     msg2,
+    exchange_network_keys,
     link_info,
     link_report,
     route_announce,

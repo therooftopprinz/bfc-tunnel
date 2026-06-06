@@ -20,6 +20,9 @@ struct beacon
 
 struct msg1
 {
+    u8 sec_ctx;
+    u8 confidentiality_algorithm;
+    u8 integrity_algorithm;
     key_t ephemeral;
     key_t signature;
 };
@@ -28,6 +31,24 @@ struct msg2
 {
     key_t ephemeral;
     key_t signature;
+};
+
+struct network_key
+{
+    u8 sec_ctx;
+    key_t key;
+    u64 creation_time_us;
+    u16 duration_s;
+    u8 confidentiality_algorithm;
+    u8 integrity_algorithm;
+};
+
+using network_keys = cum::vector<network_key, 256>;
+struct exchange_network_keys
+{
+    u8 record_index;
+    u8 record_total;
+    network_keys keys;
 };
 
 struct link_info
@@ -71,7 +92,7 @@ struct n2n_indication
     u16 port;
 };
 
-using BTPMessage = std::variant<beacon,msg1,msg2,link_info,link_report,route_announce,n2n_indication>;
+using BTPMessage = std::variant<beacon,msg1,msg2,exchange_network_keys,link_info,link_report,route_announce,n2n_indication>;
 /***********************************************
 /
 /            Codec Definitions
@@ -114,6 +135,9 @@ inline void str(const char* pName, const beacon& pIe, std::string& pCtx, bool pI
 inline void encode_per(const msg1& pIe, cum::per_codec_ctx& pCtx)
 {
     using namespace cum;
+    encode_per(pIe.sec_ctx, pCtx);
+    encode_per(pIe.confidentiality_algorithm, pCtx);
+    encode_per(pIe.integrity_algorithm, pCtx);
     encode_per(pIe.ephemeral, pCtx);
     encode_per(pIe.signature, pCtx);
 }
@@ -121,6 +145,9 @@ inline void encode_per(const msg1& pIe, cum::per_codec_ctx& pCtx)
 inline void decode_per(msg1& pIe, cum::per_codec_ctx& pCtx)
 {
     using namespace cum;
+    decode_per(pIe.sec_ctx, pCtx);
+    decode_per(pIe.confidentiality_algorithm, pCtx);
+    decode_per(pIe.integrity_algorithm, pCtx);
     decode_per(pIe.ephemeral, pCtx);
     decode_per(pIe.signature, pCtx);
 }
@@ -137,7 +164,10 @@ inline void str(const char* pName, const msg1& pIe, std::string& pCtx, bool pIsL
         pCtx = pCtx + "\"" + pName + "\":{";
     }
     size_t nOptional = 0;
-    size_t nMandatory = 2;
+    size_t nMandatory = 5;
+    str("sec_ctx", pIe.sec_ctx, pCtx, !(--nMandatory+nOptional));
+    str("confidentiality_algorithm", pIe.confidentiality_algorithm, pCtx, !(--nMandatory+nOptional));
+    str("integrity_algorithm", pIe.integrity_algorithm, pCtx, !(--nMandatory+nOptional));
     str("ephemeral", pIe.ephemeral, pCtx, !(--nMandatory+nOptional));
     str("signature", pIe.signature, pCtx, !(--nMandatory+nOptional));
     pCtx = pCtx + "}";
@@ -176,6 +206,93 @@ inline void str(const char* pName, const msg2& pIe, std::string& pCtx, bool pIsL
     size_t nMandatory = 2;
     str("ephemeral", pIe.ephemeral, pCtx, !(--nMandatory+nOptional));
     str("signature", pIe.signature, pCtx, !(--nMandatory+nOptional));
+    pCtx = pCtx + "}";
+    if (!pIsLast)
+    {
+        pCtx += ",";
+    }
+}
+
+inline void encode_per(const network_key& pIe, cum::per_codec_ctx& pCtx)
+{
+    using namespace cum;
+    encode_per(pIe.sec_ctx, pCtx);
+    encode_per(pIe.key, pCtx);
+    encode_per(pIe.creation_time_us, pCtx);
+    encode_per(pIe.duration_s, pCtx);
+    encode_per(pIe.confidentiality_algorithm, pCtx);
+    encode_per(pIe.integrity_algorithm, pCtx);
+}
+
+inline void decode_per(network_key& pIe, cum::per_codec_ctx& pCtx)
+{
+    using namespace cum;
+    decode_per(pIe.sec_ctx, pCtx);
+    decode_per(pIe.key, pCtx);
+    decode_per(pIe.creation_time_us, pCtx);
+    decode_per(pIe.duration_s, pCtx);
+    decode_per(pIe.confidentiality_algorithm, pCtx);
+    decode_per(pIe.integrity_algorithm, pCtx);
+}
+
+inline void str(const char* pName, const network_key& pIe, std::string& pCtx, bool pIsLast)
+{
+    using namespace cum;
+    if (!pName)
+    {
+        pCtx = pCtx + "{";
+    }
+    else
+    {
+        pCtx = pCtx + "\"" + pName + "\":{";
+    }
+    size_t nOptional = 0;
+    size_t nMandatory = 6;
+    str("sec_ctx", pIe.sec_ctx, pCtx, !(--nMandatory+nOptional));
+    str("key", pIe.key, pCtx, !(--nMandatory+nOptional));
+    str("creation_time_us", pIe.creation_time_us, pCtx, !(--nMandatory+nOptional));
+    str("duration_s", pIe.duration_s, pCtx, !(--nMandatory+nOptional));
+    str("confidentiality_algorithm", pIe.confidentiality_algorithm, pCtx, !(--nMandatory+nOptional));
+    str("integrity_algorithm", pIe.integrity_algorithm, pCtx, !(--nMandatory+nOptional));
+    pCtx = pCtx + "}";
+    if (!pIsLast)
+    {
+        pCtx += ",";
+    }
+}
+
+inline void encode_per(const exchange_network_keys& pIe, cum::per_codec_ctx& pCtx)
+{
+    using namespace cum;
+    encode_per(pIe.record_index, pCtx);
+    encode_per(pIe.record_total, pCtx);
+    encode_per(pIe.keys, pCtx);
+}
+
+inline void decode_per(exchange_network_keys& pIe, cum::per_codec_ctx& pCtx)
+{
+    using namespace cum;
+    decode_per(pIe.record_index, pCtx);
+    decode_per(pIe.record_total, pCtx);
+    decode_per(pIe.keys, pCtx);
+}
+
+inline void str(const char* pName, const exchange_network_keys& pIe, std::string& pCtx, bool pIsLast)
+{
+    using namespace cum;
+    if (!pName)
+    {
+        pCtx = pCtx + "{";
+    }
+    else
+    {
+        pCtx = pCtx + "\"" + pName + "\":{";
+    }
+    size_t nOptional = 0;
+    size_t nMandatory = 3;
+    str("record_index", pIe.record_index, pCtx, !(--nMandatory+nOptional));
+    str("record_total", pIe.record_total, pCtx, !(--nMandatory+nOptional));
+    str("keys", pIe.keys, pCtx, !(--nMandatory+nOptional));
     pCtx = pCtx + "}";
     if (!pIsLast)
     {
@@ -427,6 +544,10 @@ inline void encode_per(const BTPMessage& pIe, cum::per_codec_ctx& pCtx)
     {
         encode_per(std::get<6>(pIe), pCtx);
     }
+    else if (7 == type)
+    {
+        encode_per(std::get<7>(pIe), pCtx);
+    }
 }
 
 inline void decode_per(BTPMessage& pIe, cum::per_codec_ctx& pCtx)
@@ -452,23 +573,28 @@ inline void decode_per(BTPMessage& pIe, cum::per_codec_ctx& pCtx)
     }
     else if (3 == type)
     {
-        pIe = link_info();
+        pIe = exchange_network_keys();
         decode_per(std::get<3>(pIe), pCtx);
     }
     else if (4 == type)
     {
-        pIe = link_report();
+        pIe = link_info();
         decode_per(std::get<4>(pIe), pCtx);
     }
     else if (5 == type)
     {
-        pIe = route_announce();
+        pIe = link_report();
         decode_per(std::get<5>(pIe), pCtx);
     }
     else if (6 == type)
     {
-        pIe = n2n_indication();
+        pIe = route_announce();
         decode_per(std::get<6>(pIe), pCtx);
+    }
+    else if (7 == type)
+    {
+        pIe = n2n_indication();
+        decode_per(std::get<7>(pIe), pCtx);
     }
 }
 
@@ -513,7 +639,7 @@ inline void str(const char* pName, const BTPMessage& pIe, std::string& pCtx, boo
             pCtx += std::string(pName) + ":{";
         else
             pCtx += "{";
-        std::string name = "link_info";
+        std::string name = "exchange_network_keys";
         str(name.c_str(), std::get<3>(pIe), pCtx, true);
         pCtx += "}";
     }
@@ -523,7 +649,7 @@ inline void str(const char* pName, const BTPMessage& pIe, std::string& pCtx, boo
             pCtx += std::string(pName) + ":{";
         else
             pCtx += "{";
-        std::string name = "link_report";
+        std::string name = "link_info";
         str(name.c_str(), std::get<4>(pIe), pCtx, true);
         pCtx += "}";
     }
@@ -533,7 +659,7 @@ inline void str(const char* pName, const BTPMessage& pIe, std::string& pCtx, boo
             pCtx += std::string(pName) + ":{";
         else
             pCtx += "{";
-        std::string name = "route_announce";
+        std::string name = "link_report";
         str(name.c_str(), std::get<5>(pIe), pCtx, true);
         pCtx += "}";
     }
@@ -543,8 +669,18 @@ inline void str(const char* pName, const BTPMessage& pIe, std::string& pCtx, boo
             pCtx += std::string(pName) + ":{";
         else
             pCtx += "{";
-        std::string name = "n2n_indication";
+        std::string name = "route_announce";
         str(name.c_str(), std::get<6>(pIe), pCtx, true);
+        pCtx += "}";
+    }
+    else if (7 == type)
+    {
+        if (pName)
+            pCtx += std::string(pName) + ":{";
+        else
+            pCtx += "{";
+        std::string name = "n2n_indication";
+        str(name.c_str(), std::get<7>(pIe), pCtx, true);
         pCtx += "}";
     }
     if (!pIsLast)

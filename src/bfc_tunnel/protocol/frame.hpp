@@ -1,5 +1,5 @@
-#ifndef BFC_TUNNEL_PROTOCOL_FRAMING_HPP
-#define BFC_TUNNEL_PROTOCOL_FRAMING_HPP
+#ifndef BFC_TUNNEL_PROTOCOL_FRAME_HPP
+#define BFC_TUNNEL_PROTOCOL_FRAME_HPP
 
 #include <bfc/buffer.hpp>
 
@@ -324,4 +324,4 @@ inline bfc::const_buffer_view frame_payload_view(const frame_const_t& frame, con
 
 } // namespace bfc_tunnel
 
-#endif // BFC_TUNNEL_PROTOCOL_FRAMING_HPP
+#endif // BFC_TUNNEL_PROTOCOL_FRAME_HPP

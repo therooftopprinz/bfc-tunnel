@@ -75,8 +75,6 @@ Local and global transport use different media but are equivalent for **BFC Tunn
 | -    | `u2`  | `frame_type`  | Frame Type                     |        |
 | 1    | `u8`  | `sec_ctx`     | Security Context               |        |
 | 1    | `u8`  | `ttl`         | Time-to-live                   |        |
-| 1    | `u4`  | `conf_algo`   | Confidentiality Algorithm      |        |
-| -    | `u4`  | `inte_algo`   | Integrity Protection Algorithm |        |
 | 4    | `u32` | `sn`          | Sequence Number                |        |
 | 4    | `u32` | `ts`          | Epoch Second                   |        |
 | 4    | `u32` | `src`         | Source NodeId                  |        |
@@ -85,7 +83,7 @@ Local and global transport use different media but are equivalent for **BFC Tunn
 | N    | `u8[]`| `payload`     | Payload                        |        |
 
 *Notes:*<br/>
-*1. `x = mac_size(integ_algo)`*<br/>
+*1. `x = mac_size(sec_ctx)`*<br/>
 
 ---
 
@@ -97,7 +95,7 @@ Frame types include *Peer*, which is used in bootstrapping network configuration
 |-------|-------------------|-------------|
 | 0     | PEER              | Message intended for direct distination (i.e: TTL==1, next_hop==target)|
 | 1     | NETWORK           | Message intended for the network.|
-| 2     | NETWORK_OVER_PEER | Message intended for the network delegated by a peer.|
+| 2     | NETWORK_OVER_PEER | Message intended for the network delegated by a peer. Payload is a NETWORK frame.|
 | 3     | PUBLIC            | Message intended for public. |
 
 ### [Core.Framing.BTF.fields] Fields
@@ -105,10 +103,9 @@ Fields are encoded in network byte order (big-endian). Bit-fields that share a b
 
 - `version` MUST match the negotiated protocol version.
 - `frame_type` selects the frame interpretation.
-- `sec_ctx` selects the active keying/material profile used to validate and decrypt the frame.
+- `sec_ctx` selects the active integrity and confidentiality algorithm, and keying/material used to validate and decrypt the frame.
 - `ttl` is decremented by each forwarding hop, and frames reaching `ttl = 0` MUST be dropped.
-- `conf_algo` and `inte_algo` identify the confidentiality and integrity transforms for this frame.
-- `mac` length is derived from `inte_algo` (`mac_size(integ_algo)`).
+- `mac` length is derived from `sec_ctx` (`mac_size(sec_ctx)`).
 - `sn` and `ts` provide replay-window and freshness inputs.
 - `src` and `dst` are overlay Node IDs used for routing and policy checks.
 - `payload` frame payload.
@@ -148,15 +145,96 @@ Participant C
 Note Over B,C: Network Security
 Note Over A,B: Peer Link Establishment
 Note Over A,B: Security is now enabled
-A -->> B : (PEER) GET_NETWORK_KEYS_REQUEST
+A -->> B : (PEER) EXCHANGE_NETWORK_KEYS
 Note Over B: Shares Network Keys to A
-B -->> A : (PEER) GET_NETWORK_KEYS_RESPONSE
+B -->> A : (PEER) EXCHANGE_NETWORK_KEYS
 Note Over A,B: Network Security is now enabled
 Note Over A,C: Network Security
 A -->> B : (NETWORK, A to C) TUNNEL_DATA
 B -->> C : (NETWORK, A to C) TUNNEL_DATA
 ```
 ---
+## [Core.BasicSecurity] Security
+
+### [Core.BasicSecurity.Peer] Peer Security
+---
+
+Peer security establishes the keys used for confidentiality and integrity protection, and its algorithms used as well.
+It follows key Noise_KK_25519 for the key exchange.
+MSG1 will be sent in plaintext (sec_ctx = 0), initiator will assign the sec_ctx (example sec_ctx=1).
+MSG2 will be sent in accordance to MSG1 sec_ctx config. sec_ctx for peer is index by (n1, n2, sec_ctx).
+n1 and n2 are node ids for initiator and responser (either of which), where n2 > n1.
+
+In local broadcast transport it is possible to have concurrent MSG1 from n1 and n2,
+in this case the later MSG1 should be cancelled to let the earlier MSG1 complete the handshake. 
+
+**Key Exchange Handshake**
+
+```mermaid
+sequenceDiagram
+title Key Exchange
+     
+  participant A as Alice
+  participant B as Bob
+
+  Note over A: known: a = Alice's Private Key
+  Note over B: known: A = Alice's Public Key
+  Note over B: known: b = Bob's Private Key
+  Note over A: known: B = Bob's Public Key
+
+  Note over A: e = Alice's Private Ephemeral Key
+  Note over B: f = Bob's Private Ephemeral Key
+
+  A -->> B: Msg1(E)
+  Note over B: E = Alice's Public Ephemeral Key
+  
+  Note over A: Aes = DH(e, B) # eS
+  Note over B: Bes = DH(E, b) # Es
+  Note over A,B: Aes == Bes == es
+
+  Note over A: Ass = DH(a, B) # sS
+  Note over B: Bss = DH(A, b) # Ss
+  Note over A,B: Ass == Bss == ss
+
+  B -->> A: Msg2(F)
+  Note over A: F = Bob's Public Ephemeral Key
+  
+  Note over A: Aee = DH(e, F) # eE
+  Note over B: Bee = DH(E, f) # Ee
+  Note over A,B: Aee == Bee == ee
+
+  Note over A: Bse = DH(a, F) # sE
+  Note over B: Ase = DH(A, f) # Se
+  Note over A,B: Ase == Bse == se
+
+  Note over B: Bck0 = HASH(B)
+  Note over A: Ack0 = HASH(B)
+  Note over A,B: Ack0 == Bck0 == ck0
+
+  Note over B: Bck1 = MixKey(Bck0, Bes)
+  Note over A: Ack1 = MixKey(Ack0, Aes)
+  Note over A,B: Ack1 == Bck1 == ck1
+
+  Note over B: Bck2 = MixKey(Bck1, Bss)
+  Note over A: Ack2 = MixKey(Ack1, Ass)
+  Note over A,B: Ack2 == Bck2 == ck2
+
+  Note over B: Bck3 = MixKey(Bck2, Bee)
+  Note over A: Ack3 = MixKey(Ack2, Aee)
+  Note over A,B: Ack3 == Bck3 == ck3
+
+  Note over B: Bck4 = MixKey(Bck3, Bse)
+  Note over A: Ack4 = MixKey(Ack3, Ase)
+  Note over A,B: Ack4 == Bck4 == ck4
+
+  Note over A,B: ks, kr = HKDF(ck4, 0, 2)
+  ```
+
+### [Core.BasicSecurity.Network] Network Security
+
+---
+
+
 
 ## [Core.Messages] Messages
 
@@ -271,7 +349,6 @@ Sent on all transport types to identify active neighboring nodes.
 | 0x02  | PEER    | MSG2           | Used to send responder's emphemeral key.                                                                           |
 | 0x03  | PEER    | LINK_INFO      | |
 | 0x04  | PEER    | LINK_REPORT    | |
-
 | 0x04  | NETWORK | ROUTE_ANNOUNCE | |
 | 0x05  | NETWORK | HUB_ANNOUNCE   | |
 | 0x06  | NETWORK | N2N_INDICATION | |
@@ -379,65 +456,3 @@ Routing is how a node decides **where to send a framed message next** so it reac
 - **Poison reverse:** When split horizon would suppress that advertisement, the node **still** sends an update on that link, but with **`metric`** set to an **unreachable** sentinel (implementation-defined maximum; receivers treat it as “not viable via this announcer on this path”). The neighbor then drops the stale path through you at once instead of waiting for timeouts.
 
 Together, distance-vector updates plus split horizon with poison reverse are the usual way to keep **`ROUTE_ANNOUNCE`** propagation convergent on hub/member meshes without requiring a global link-state database.
-
-## 2 Basic  Security
-### 2.1 Key Exchange
-```mermaid
-sequenceDiagram
-title Key Exchange
-     
-  participant A as Alice
-  participant B as Bob
-
-  Note over A: known: a = Alice's Private Key
-  Note over B: known: A = Alice's Public Key
-  Note over B: known: b = Bob's Private Key
-  Note over A: known: B = Bob's Public Key
-
-  Note over A: e = Alice's Private Ephemeral Key
-  Note over B: f = Bob's Private Ephemeral Key
-
-  A -->> B: Msg1(E)
-  Note over B: E = Alice's Public Ephemeral Key
-  
-  Note over A: Aes = DH(e, B) # eS
-  Note over B: Bes = DH(E, b) # Es
-  Note over A,B: Aes == Bes == es
-
-  Note over A: Ass = DH(a, B) # sS
-  Note over B: Bss = DH(A, b) # Ss
-  Note over A,B: Ass == Bss == ss
-
-  B -->> A: Msg2(F)
-  Note over A: F = Bob's Public Ephemeral Key
-  
-  Note over A: Aee = DH(e, F) # eE
-  Note over B: Bee = DH(E, f) # Ee
-  Note over A,B: Aee == Bee == ee
-
-  Note over A: Bse = DH(a, F) # sE
-  Note over B: Ase = DH(A, f) # Se
-  Note over A,B: Ase == Bse == se
-
-  Note over B: Bck0 = HASH(B)
-  Note over A: Ack0 = HASH(B)
-  Note over A,B: Ack0 == Bck0 == ck0
-
-  Note over B: Bck1 = MixKey(Bck0, Bes)
-  Note over A: Ack1 = MixKey(Ack0, Aes)
-  Note over A,B: Ack1 == Bck1 == ck1
-
-  Note over B: Bck2 = MixKey(Bck1, Bss)
-  Note over A: Ack2 = MixKey(Ack1, Ass)
-  Note over A,B: Ack2 == Bck2 == ck2
-
-  Note over B: Bck3 = MixKey(Bck2, Bee)
-  Note over A: Ack3 = MixKey(Ack2, Aee)
-  Note over A,B: Ack3 == Bck3 == ck3
-
-  Note over B: Bck4 = MixKey(Bck3, Bse)
-  Note over A: Ack4 = MixKey(Ack3, Ase)
-  Note over A,B: Ack4 == Bck4 == ck4
-
-  Note over A,B: ks, kr = HKDF(ck4, 0, 2)
-```

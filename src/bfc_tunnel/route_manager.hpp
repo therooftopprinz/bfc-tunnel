@@ -11,9 +11,9 @@ namespace bfc_tunnel
 
 struct route_entry_s
 {
-    node_id_s origin;
-    node_id_s next;
-    node_id_s target;
+    node_id_t origin;
+    node_id_t next;
+    node_id_t target;
     uint16_t  metric;
 };
 
@@ -28,10 +28,10 @@ public:
     // Get the last update delta of the routes.
     const std::vector<route_entry_s>& get_last_update_delta() const;
     // Get the snapshot of the routes.
-    const std::unordered_map<node_id_s, route_entry_s>& get_routes() const;
+    const std::unordered_map<node_id_t, route_entry_s>& get_routes() const;
 
 private:
-    std::unordered_map<node_id_s, route_entry_s> routes_by_target;
+    std::unordered_map<node_id_t, route_entry_s> routes_by_target;
     std::vector<route_entry_s>                   last_update_delta;
 };
 

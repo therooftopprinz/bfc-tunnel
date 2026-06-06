@@ -12,9 +12,9 @@ bool route_entries_equal(const route_entry_s& a, const route_entry_s& b)
 }
 
 /** For one update batch, keep the best (lowest metric) offer per target; first entry wins ties. */
-std::unordered_map<node_id_s, route_entry_s> best_per_target(const std::vector<route_entry_s>& routes)
+std::unordered_map<node_id_t, route_entry_s> best_per_target(const std::vector<route_entry_s>& routes)
 {
-    std::unordered_map<node_id_s, route_entry_s> out;
+    std::unordered_map<node_id_t, route_entry_s> out;
     out.reserve(routes.size());
     for (const route_entry_s& e : routes)
     {
@@ -38,7 +38,7 @@ route_manager::~route_manager() = default;
 
 bool route_manager::update_route(const std::vector<route_entry_s>& routes)
 {
-    std::unordered_map<node_id_s, route_entry_s> batch = best_per_target(routes);
+    std::unordered_map<node_id_t, route_entry_s> batch = best_per_target(routes);
 
     std::vector<route_entry_s> delta;
     delta.reserve(batch.size());
@@ -65,7 +65,7 @@ const std::vector<route_entry_s>& route_manager::get_last_update_delta() const
     return last_update_delta;
 }
 
-const std::unordered_map<node_id_s, route_entry_s>& route_manager::get_routes() const
+const std::unordered_map<node_id_t, route_entry_s>& route_manager::get_routes() const
 {
     return routes_by_target;
 }

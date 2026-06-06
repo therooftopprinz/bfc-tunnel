@@ -51,8 +51,8 @@ TEST(protocol_validate_header, rejects_when_declared_payload_exceeds_buffer)
     h->net_id = 0;
     h->ttl = 0;
     h->size = 1000;
-    std::memset(h->src.data(), 0, h->src.size());
-    std::memset(h->dst.data(), 0, h->dst.size());
+    h->src = 0;
+    h->dst = 0;
 
     EXPECT_FALSE(validate_header(view_of(storage, sizeof(header_s))));
 }
@@ -66,8 +66,8 @@ TEST(protocol_validate_header, rejects_wrong_version)
     h->net_id = 0;
     h->ttl = 0;
     h->size = static_cast<uint16_t>(sizeof(id_request_s));
-    std::memset(h->src.data(), 0, h->src.size());
-    std::memset(h->dst.data(), 0, h->dst.size());
+    h->src = 0;
+    h->dst = 0;
 
     const std::size_t total = sizeof(header_s) + sizeof(id_request_s);
     EXPECT_FALSE(validate_header(view_of(storage, total)));
@@ -82,8 +82,8 @@ TEST(protocol_validate_header, rejects_type_above_range)
     h->net_id = 0;
     h->ttl = 0;
     h->size = 0;
-    std::memset(h->src.data(), 0, h->src.size());
-    std::memset(h->dst.data(), 0, h->dst.size());
+    h->src = 0;
+    h->dst = 0;
 
     EXPECT_FALSE(validate_header(view_of(storage, sizeof(header_s))));
 }
@@ -97,8 +97,8 @@ TEST(protocol_validate_header, accepts_minimal_valid_header_with_zero_payload)
     h->net_id = 0;
     h->ttl = 0;
     h->size = 0;
-    std::memset(h->src.data(), 0, h->src.size());
-    std::memset(h->dst.data(), 0, h->dst.size());
+    h->src = 0;
+    h->dst = 0;
 
     EXPECT_TRUE(validate_header(view_of(storage, sizeof(header_s))));
 }
@@ -112,8 +112,8 @@ TEST(protocol_validate_header, accepts_header_plus_matching_payload_length)
     h->net_id = 1;
     h->ttl = 2;
     h->size = static_cast<uint16_t>(sizeof(id_request_s));
-    std::memset(h->src.data(), 3, h->src.size());
-    std::memset(h->dst.data(), 4, h->dst.size());
+    h->src = 3;
+    h->dst = 4;
 
     const std::size_t total = sizeof(header_s) + sizeof(id_request_s);
     EXPECT_TRUE(validate_header(view_of(storage, total)));

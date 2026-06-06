@@ -1,7 +1,6 @@
 #ifndef BFC_TUNNEL_PROTOCOL_HPP
 #define BFC_TUNNEL_PROTOCOL_HPP
 
-#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
@@ -10,6 +9,7 @@
 
 #include <bfc/buffer.hpp>
 
+#include <bfc_tunnel/bfc_tunnel_types.hpp>
 #include <bfc_tunnel/utils/safeint.hpp>
 
 namespace bfc_tunnel
@@ -27,8 +27,6 @@ enum message_type_e
     E_MSG_TYPE_TUNNEL_DATA    = 0x07,
 };
 
-using node_id_t = std::array<uint8_t, 16>;
-
 struct __attribute__((packed)) header_s
 {
     uint8_t version;
@@ -36,8 +34,8 @@ struct __attribute__((packed)) header_s
     bfc_tunnel::BEU16UA net_id;
     bfc_tunnel::BEU16UA ttl;
     bfc_tunnel::BEU16UA size;
-    node_id_t src;
-    node_id_t dst;
+    bfc_tunnel::BEU32UA src;
+    bfc_tunnel::BEU32UA dst;
 };
 
 struct __attribute__((packed)) id_request_s
@@ -51,7 +49,7 @@ struct __attribute__((packed)) id_response_s
 {
     BEU64UA id;
     uint8_t status;
-    node_id_t node_id;
+    bfc_tunnel::BEU32UA node_id;
 };
 
 struct __attribute__((packed)) link_info_s
@@ -71,9 +69,10 @@ struct __attribute__((packed)) link_report_s
 
 struct __attribute__((packed)) route_announce_entry_s
 {
-    node_id_t origin;
-    BEU64UA sn;
-    uint8_t count;
+    bfc_tunnel::BEU32UA origin_node_id;
+    bfc_tunnel::BEU32UA next_node_id;
+    bfc_tunnel::BEU32UA target_node_id;
+    bfc_tunnel::BEU16UA path_metric;
 };
 
 struct __attribute__((packed)) route_announce_s
@@ -89,12 +88,12 @@ struct __attribute__((packed)) route_announce_s
 
 struct __attribute__((packed)) hub_announce_entry_s
 {
-    node_id_t node_id;
+    bfc_tunnel::BEU32UA node_id;
 };
 
 struct __attribute__((packed)) hub_announce_s
 {
-    node_id_t origin;
+    bfc_tunnel::BEU32UA origin;
     BEU64UA sn;
     BEU16UA page;
     BEU16UA total;
@@ -106,8 +105,8 @@ struct __attribute__((packed)) hub_announce_s
 
 struct __attribute__((packed)) n2n_indication_s
 {
-    node_id_t origin;
-    node_id_t target;
+    bfc_tunnel::BEU32UA origin;
+    bfc_tunnel::BEU32UA target;
     BEU32UA hostv4;
     BEU16UA port;
 };

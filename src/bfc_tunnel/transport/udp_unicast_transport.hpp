@@ -2,6 +2,8 @@
 #define BFC_TUNNEL_TRANSPORT_udp_unicast_transport_HPP
 
 #include <memory>
+#include <future>
+#include <optional>
 
 #include <bfc/default_reactor.hpp>
 #include <bfc/cv_reactor.hpp>
@@ -55,6 +57,8 @@ private:
     };
 
     std::atomic<transport_state_e> state = E_TRANSPORT_STATE_UNINITIALIZED;
+
+    std::optional<std::promise<void>> deinitialize_promise;
 };
 
 } // namespace bfc_tunnel

@@ -14,9 +14,12 @@
 namespace bfc_tunnel
 {
 
-using reactor_cb_t = typename bfc::function_type_helper<64, void()>::type;
-using cv_reactor_t = bfc::cv_reactor<reactor_cb_t>;
-using io_reactor_t = bfc::default_reactor<reactor_cb_t>;
+using cv_reactor_cb_t = typename bfc::function_type_helper<64, void()>::type;
+using io_reactor_cb_t = std::function<void()>;
+
+using reactor_cb_t = cv_reactor_cb_t;
+using cv_reactor_t = bfc::cv_reactor<cv_reactor_cb_t>;
+using io_reactor_t = bfc::default_reactor<io_reactor_cb_t>;
 using io_reactor_ptr_t = std::shared_ptr<io_reactor_t>;
 using cv_reactor_ptr_t = std::shared_ptr<cv_reactor_t>;
 

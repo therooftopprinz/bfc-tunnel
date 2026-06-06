@@ -1,21 +1,14 @@
 #include <bfc_tunnel/node.hpp>
 #include <bfc_tunnel/utils/logger.hpp>
-#include <bfc_tunnel/protocol/btprotocol.hpp>
+
+#include <cinttypes>
+#include <stdexcept>
 
 namespace bfc_tunnel
 {
 
-node::node(
-    cv_reactor_ptr_t cv_reactor,
-    node_transport_queue_ptr_t transport_out,
-    transport_node_queue_ptr_t transport_in,
-    node_service_queue_ptr_t service_out,
-    service_node_queue_ptr_t service_in)
-    : cv_reactor(cv_reactor)
-    , transport_out(transport_out)
-    , transport_in(transport_in)
-    , service_out(service_out)
-    , service_in(service_in)
+node::node(cv_reactor_ptr_t cv_reactor)
+    : cv_reactor(std::move(cv_reactor))
 {}
 
 node::~node()
@@ -26,144 +19,177 @@ node::~node()
 void node::initialize()
 {
     cv_reactor->wake_up(
-            [w = weak_from_this()]()
-            {
-                auto t = w.lock();
-                if (!t)
-                {
-                    log(*g_logger, E_LOG_BIT_SHOULD_NOT_HAPPEN, "node[nullptr]::initialize: Weak pointer expired!");
-                    return;
-                }
-
-                t->cv_reactor->add_read_rdy(*t->transport_in,
-                    [w]()
-                    {
-                        auto t = w.lock();
-                        if (!t)
-                        {
-                            log(*g_logger, E_LOG_BIT_SHOULD_NOT_HAPPEN, "node[nullptr]::on_transport_in_queue_ready: Weak pointer expired!");
-                            return;
-                        }
-                        t->on_transport_in_queue_ready();
-                    });
-                t->cv_reactor->add_read_rdy(*t->service_in,
-                    [w]()
-                    {
-                        auto t = w.lock();
-                        if (!t)
-                        {
-                            log(*g_logger, E_LOG_BIT_SHOULD_NOT_HAPPEN, "node[nullptr]::on_service_in_queue_ready: Weak pointer expired!");
-                            return;
-                        }
-                        t->on_service_in_queue_ready();
-                    });
-                t->state = E_NODE_STATE_INITIALIZED;
-            }
-        );
-}
-
-void node::on_transport_in_queue_ready()
-{
-    auto ins = transport_in->pop();
-    if (ins.empty())
-    {
-        return;
-    }
-
-    for (auto& in : ins)
-    {
-        auto& header = *(header_s*) in.pdu.data();
-        if (!validate_header(in.pdu))
+        [w = weak_from_this()]()
         {
-            log(*g_logger, E_LOG_BIT_ERROR, "node[%p]::on_transport_in_queue_ready: Invalid header!", this);
-            continue;
-        }
+            auto t = w.lock();
+            if (!t)
+            {
+                log(*g_logger, E_LOG_BIT_SHOULD_NOT_HAPPEN, "node[nullptr]::initialize: Weak pointer expired!");
+                return;
+            }
 
-        handle_transport_message(header, payload_view(&header));
-    }
+            t->state = E_NODE_STATE_INITIALIZED;
+        }
+    );
 }
 
-void node::on_service_in_queue_ready()
+void node::uninitialize()
 {
-    auto sdus = service_in->pop();
-    if (sdus.empty())
+    cv_reactor->wake_up(
+        [w = weak_from_this()]()
+        {
+            auto t = w.lock();
+            if (!t || E_NODE_STATE_UNINITIALIZED == t->state)
+            {
+                return;
+            }
+
+            for (auto& transport : t->transports)
+            {
+                t->cv_reactor->remove_read_rdy(transport->out);
+            }
+            t->transports.clear();
+            t->state = E_NODE_STATE_UNINITIALIZED;
+        }
+    );
+}
+
+void node::add_transport(transport_queue_pair_ptr_t transport)
+{
+    if (!transport)
+    {
+        log(*g_logger, E_LOG_BIT_ERROR, "node[%p]::add_transport: Transport queue pair is null!", this);
+        return;
+    }
+
+    cv_reactor->wake_up(
+        [w = weak_from_this(), transport]()
+        {
+            auto t = w.lock();
+            if (!t)
+            {
+                log(*g_logger, E_LOG_BIT_SHOULD_NOT_HAPPEN, "node[nullptr]::add_transport: Weak pointer expired!");
+                return;
+            }
+
+            t->transports.push_back(transport);
+            t->cv_reactor->add_read_rdy(
+                transport->out,
+                [w, transport]()
+                {
+                    auto t = w.lock();
+                    if (!t)
+                    {
+                        log(*g_logger, E_LOG_BIT_SHOULD_NOT_HAPPEN, "node[nullptr]::on_transport_out_ready: Weak pointer expired!");
+                        return;
+                    }
+                    t->on_transport_out_ready(transport);
+                }
+            );
+        }
+    );
+}
+
+void node::on_transport_out_ready(transport_queue_pair_ptr_t transport)
+{
+    auto outs = transport->out.pop();
+    if (outs.empty())
     {
         return;
     }
-}
 
-void node::handle_transport_message(const header_s& header, const bfc::buffer_view& payload)
-{
-    switch (header.type)
+    for (auto& out : outs)
     {
-        case E_MSG_TYPE_ID_REQUEST:
-            handle_transport_message(header, *(id_request_s*) payload.data());
-            break;
-        case E_MSG_TYPE_ID_RESPONSE:
-            handle_transport_message(header, *(id_response_s*) payload.data());
-            break;
-        case E_MSG_TYPE_LINK_INFO:
-            handle_transport_message(header, *(link_info_s*) payload.data());
-            break;
-        case E_MSG_TYPE_LINK_REPORT:
-            handle_transport_message(header, *(link_report_s*) payload.data());
-            break;
-        case E_MSG_TYPE_ROUTE_ANNOUNCE:
-            handle_transport_message(header, *(route_announce_s*) payload.data());
-            break;
-        case E_MSG_TYPE_HUB_ANNOUNCE:
-            handle_transport_message(header, *(hub_announce_s*) payload.data());
-            break;
-        case E_MSG_TYPE_N2N_INDICATION:
-            handle_transport_message(header, *(n2n_indication_s*) payload.data());
-            break;
-        case E_MSG_TYPE_TUNNEL_DATA:
-            handle_transport_message(header, *(tunnel_data_s*) payload.data());
-            break;
-        default:
-            log(*g_logger, E_LOG_BIT_SHOULD_NOT_HAPPEN, "node[%p]::handle_transport_message: Invalid message type!", this);
-            break;
+        std::visit([this](auto& e) { handle_transport_out(e); }, out);
     }
 }
 
-void node::handle_transport_message(const header_s& header, const id_request_s& payload)
+void node::handle_transport_out(const transport_identity_s& data)
 {
-    log(*g_logger, E_LOG_BIT_INFO, "node[%p]::handle_transport_message: ID request!", this);
+    log(*g_logger, E_LOG_BIT_INFO, "node[%p]::handle_transport_out: Transport identity type=%d address=%s",
+        this, static_cast<int>(data.type), data.address.c_str());
 }
 
-void node::handle_transport_message(const header_s& header, const id_response_s& payload)
+void node::handle_transport_out(const transport_data_s& data)
 {
-    log(*g_logger, E_LOG_BIT_INFO, "node[%p]::handle_transport_message: ID response!", this);
+    handle_pdu(bfc::const_buffer_view(data.data));
 }
 
-void node::handle_transport_message(const header_s& header, const link_info_s& payload)
+void node::handle_transport_out(const transport4_data_s& data)
 {
-    log(*g_logger, E_LOG_BIT_INFO, "node[%p]::handle_transport_message: Link info!", this);
+    handle_pdu(bfc::const_buffer_view(data.data));
 }
 
-void node::handle_transport_message(const header_s& header, const link_report_s& payload)
+void node::handle_transport_out(const transport6_data_s& data)
 {
-    log(*g_logger, E_LOG_BIT_INFO, "node[%p]::handle_transport_message: Link report!", this);
+    handle_pdu(bfc::const_buffer_view(data.data));
 }
 
-void node::handle_transport_message(const header_s& header, const route_announce_s& payload)
+void node::handle_transport_out(const transport_delivery_failure& data)
 {
-    log(*g_logger, E_LOG_BIT_INFO, "node[%p]::handle_transport_message: Route announce!", this);
+    log(*g_logger, E_LOG_BIT_ERROR, "node[%p]::handle_transport_out: Delivery failure id=%" PRIu64 " error=%d",
+        this, data.id, data.error);
 }
 
-void node::handle_transport_message(const header_s& header, const hub_announce_s& payload)
+void node::handle_pdu(const bfc::const_buffer_view& pdu)
 {
-    log(*g_logger, E_LOG_BIT_INFO, "node[%p]::handle_transport_message: Hub announce!", this);
+    if (pdu.empty())
+    {
+        log(*g_logger, E_LOG_BIT_ERROR, "node[%p]::handle_pdu: Empty PDU!", this);
+        return;
+    }
+
+    try
+    {
+        cum::BTPMessage msg;
+        cum::per_codec_ctx ctx(const_cast<std::byte*>(pdu.data()), pdu.size());
+        cum::decode_per(msg, ctx);
+        handle_btp_message(msg);
+    }
+    catch (const std::exception& e)
+    {
+        log(*g_logger, E_LOG_BIT_ERROR, "node[%p]::handle_pdu: PER decode failed: %s", this, e.what());
+    }
 }
 
-void node::handle_transport_message(const header_s& header, const n2n_indication_s& payload)
+void node::handle_btp_message(const cum::BTPMessage& msg)
 {
-    log(*g_logger, E_LOG_BIT_INFO, "node[%p]::handle_transport_message: N2N indication!", this);
+    std::visit([this](const auto& m) { handle_btp_message(m); }, msg);
 }
 
-void node::handle_transport_message(const header_s& header, const tunnel_data_s& payload)
+void node::handle_btp_message(const cum::beacon& /*msg*/)
 {
-    log(*g_logger, E_LOG_BIT_INFO, "node[%p]::handle_transport_message: Tunnel data!", this);
+    log(*g_logger, E_LOG_BIT_INFO, "node[%p]::handle_btp_message: Beacon!", this);
+}
+
+void node::handle_btp_message(const cum::msg1& /*msg*/)
+{
+    log(*g_logger, E_LOG_BIT_INFO, "node[%p]::handle_btp_message: Msg1!", this);
+}
+
+void node::handle_btp_message(const cum::msg2& /*msg*/)
+{
+    log(*g_logger, E_LOG_BIT_INFO, "node[%p]::handle_btp_message: Msg2!", this);
+}
+
+void node::handle_btp_message(const cum::link_info& /*msg*/)
+{
+    log(*g_logger, E_LOG_BIT_INFO, "node[%p]::handle_btp_message: Link info!", this);
+}
+
+void node::handle_btp_message(const cum::link_report& /*msg*/)
+{
+    log(*g_logger, E_LOG_BIT_INFO, "node[%p]::handle_btp_message: Link report!", this);
+}
+
+void node::handle_btp_message(const cum::route_announce& /*msg*/)
+{
+    log(*g_logger, E_LOG_BIT_INFO, "node[%p]::handle_btp_message: Route announce!", this);
+}
+
+void node::handle_btp_message(const cum::n2n_indication& /*msg*/)
+{
+    log(*g_logger, E_LOG_BIT_INFO, "node[%p]::handle_btp_message: N2N indication!", this);
 }
 
 } // namespace bfc_tunnel

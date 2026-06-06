@@ -91,7 +91,7 @@ Local and global transport use different media but are equivalent for **BFC Tunn
 
 **Frame Types**
 
-Frame types include *Peer*, which is used in bootstrapping network configuration and security and is not routable; *Network*, which is used for routing and data delivery;**, which allows a node to pass a secured message through a peer when network security is not yet available; and Public, which is used for node beacon messages.
+Frame types include *Peer*, which is used in bootstrapping network configuration and security and is not routable; *Network*, which is used for routing and data delivery; which allows a node to pass a secured message through a peer when network security is not yet available; and Public, which is used for node beacon messages.
 
 | Value | Name              | Description |
 |-------|-------------------|-------------|

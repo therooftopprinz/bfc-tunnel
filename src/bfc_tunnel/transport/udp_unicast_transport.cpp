@@ -4,6 +4,7 @@
 #include <bfc/sized_buffer.hpp>
 #include <bfc_tunnel/transport/udp_unicast_transport.hpp>
 #include <bfc_tunnel/utils/logger.hpp>
+#include <bfc_tunnel/utils/string_utils.hpp>
 
 #include <numeric>
 #include <future>
@@ -101,36 +102,54 @@ void udp_unicast_transport::configure(const udp_unicast_transport_config_s& conf
                 return;
             }
 
-            auto split_ip_and_port = [](const std::string& address) -> std::pair<std::string, uint16_t> {
+            auto split_ip_and_port = [](const std::string& address) -> std::optional<std::pair<std::string, uint16_t>> {
                 auto pos = address.find_last_of(':');
                 if (pos == std::string::npos)
                 {
-                    return {address, 0};
+                    return std::make_pair(address, uint16_t{0});
                 }
-                return {address.substr(0, pos), std::stoi(address.substr(pos + 1))};
+
+                auto port = utils::str_as<uint16_t>(address.substr(pos + 1));
+                if (!port)
+                {
+                    return std::nullopt;
+                }
+
+                return std::make_pair(address.substr(0, pos), *port);
             };
+
+            auto parsed = split_ip_and_port(config.address);
+            if (!parsed)
+            {
+                log(*g_logger, E_LOG_BIT_ERROR, "udp_unicast_transport[%p]::configure: Invalid address port! address=%s",
+                    t.get(), config.address.c_str());
+                t->sock = {};
+                return;
+            }
+
+            const auto& [ip_address, port] = *parsed;
 
             if (t->is_v6)
             {
-                auto [ipv6_address, port] = split_ip_and_port(config.address);
-                auto bind_addr = bfc::ip6_port_to_sockaddr(ipv6_address, port);
+                auto bind_addr = bfc::ip6_port_to_sockaddr(ip_address, port);
                 if (0 > t->sock.bind(bind_addr))
                 {
-                    log(*g_logger, E_LOG_BIT_ERROR, "udp_unicast_transport[%p]::configure: Failed to bind socket! error=%d(%s)",
+                    log(*g_logger, E_LOG_BIT_ERROR, "udp_unicast_transport[%p]::configure: Failed to bind6 socket! error=%d(%s)",
                         t.get(), errno, strerror(errno));
+                    t->sock = {};
                     return;
                 }
             }
             else
             {
-                auto [ipv4_address, port] = split_ip_and_port(config.address);
-                auto bind_addr = bfc::ip4_port_to_sockaddr(ipv4_address, port);
+                auto bind_addr = bfc::ip4_port_to_sockaddr(ip_address, port);
                 if (0 > t->sock.bind(bind_addr))
                 {
-                    log(*g_logger, E_LOG_BIT_ERROR, "udp_unicast_transport[%p]::configure: Failed to bind6 socket! error=%d(%s)",
+                    log(*g_logger, E_LOG_BIT_ERROR, "udp_unicast_transport[%p]::configure: Failed to bind4 socket! error=%d(%s)",
                         t.get(), errno, strerror(errno));
+                    t->sock = {};
                     return;
-                }    
+                }
             }
 
             t->io_reactor->add_read_rdy(
@@ -158,59 +177,53 @@ void udp_unicast_transport::configure(const udp_unicast_transport_config_s& conf
 
 void udp_unicast_transport::deinitialize()
 {
-    auto done = std::make_shared<std::promise<void>>();
+    deinitialize_promise.emplace();
+    std::promise<void>& done = deinitialize_promise.value();
 
     io_reactor->wake_up(
-            [w = weak_from_this(), done]()
+            [w = weak_from_this(), &done]()
             {
                 auto t = w.lock();
                 if (!t)
                 {
                     log(*g_logger, E_LOG_BIT_SHOULD_NOT_HAPPEN, "udp_unicast_transport[nullptr]::deinitialize: io_reactor callback: Weak pointer expired!");
-                    done->set_value();
+                    done.set_value();
                     return;
                 }
 
                 if (E_TRANSPORT_STATE_UNINITIALIZED == t->state.load())
                 {
                     log(*g_logger, E_LOG_BIT_ERROR, "udp_unicast_transport[%p]::deinitialize: Transport already uninitialized!", t.get());
-                    done->set_value();
+                    done.set_value();
+                    t->deinitialize_promise.reset();
                     return;
                 }
 
                 const int sock_fd = t->sock.fd();
-                const bool recv_registered = (E_TRANSPORT_STATE_CONFIGURED == t->state.load());
 
                 t->state.store(E_TRANSPORT_STATE_UNINITIALIZED);
                 t->cv_reactor->remove_read_rdy(t->transport_queue_pair->in);
-
-                auto finish = [w, done]()
-                {
-                    auto t = w.lock();
-                    if (!t)
+                t->io_reactor->rem_read_rdy(
+                    sock_fd,
+                    [w]()
                     {
-                        log(*g_logger, E_LOG_BIT_SHOULD_NOT_HAPPEN, "udp_unicast_transport[nullptr]::deinitialize: finish: Weak pointer expired!");
-                        done->set_value();
-                        return;
-                    }
+                        if (auto t = w.lock())
+                        {
+                            t->sock = bfc::socket();
+                            t->config = {};
 
-                    t->sock = bfc::socket();
-                    t->config = {};
-                    done->set_value();
-                };
-
-                if (recv_registered && 0 <= sock_fd)
-                {
-                    t->io_reactor->rem_read_rdy(sock_fd, finish);
-                }
-                else
-                {
-                    finish();
-                }
+                            if (t->deinitialize_promise)
+                            {
+                                t->deinitialize_promise->set_value();
+                                t->deinitialize_promise.reset();
+                            }
+                        }
+                    });
             }
         );
 
-    done->get_future().wait();
+    deinitialize_promise->get_future().wait();
+    deinitialize_promise.reset();
 }
 
 void udp_unicast_transport::on_in_queue_ready()
@@ -232,6 +245,10 @@ void udp_unicast_transport::handle(const transport_query_identity_s& /*data*/)
     if (state.load() != E_TRANSPORT_STATE_CONFIGURED)
     {
         log(*g_logger, E_LOG_BIT_ERROR, "udp_unicast_transport[%p]::handle: Transport not configured!", this);
+        transport_queue_pair->out.push(transport_identity_s{
+            E_TRANSPORT_TYPE_UDP_UNICAST,
+            ""
+        });
         return;
     }
 
@@ -280,29 +297,38 @@ void udp_unicast_transport::handle(const transport6_data_s& data)
 
 void udp_unicast_transport::on_sock_recv_ready()
 {
-    if (state.load() != E_TRANSPORT_STATE_CONFIGURED)
-    {
-        return;
-    }
-
-    sockaddr_storage addr;
     // todo: use buffer pool
     constexpr size_t MAX_PDU_SIZE = 1024 * 64;
-    bfc::sized_buffer pdu(MAX_PDU_SIZE);
-    socklen_t addr_len = sizeof(addr);
-    auto n = sock.recv(pdu, 0, (sockaddr*)&addr, &addr_len);
-    if (n > 0)
+
+    while (state.load() == E_TRANSPORT_STATE_CONFIGURED)
     {
-        pdu.resize(static_cast<size_t>(n));
-        auto buffer = std::move(pdu).to_buffer();
-        if (is_v6)
+        sockaddr_storage addr;
+        socklen_t addr_len = sizeof(addr);
+        bfc::sized_buffer pdu(MAX_PDU_SIZE);
+
+        auto n = sock.recv(pdu, 0, (sockaddr*)&addr, &addr_len);
+        if (n > 0)
         {
-            transport_queue_pair->out.push(transport6_data_s{0, *(sockaddr_in6*)&addr, std::move(buffer)});
+            pdu.resize(static_cast<size_t>(n));
+            auto buffer = std::move(pdu).to_buffer();
+            if (is_v6)
+            {
+                transport_queue_pair->out.push(transport6_data_s{0, *(sockaddr_in6*)&addr, std::move(buffer)});
+            }
+            else
+            {
+                transport_queue_pair->out.push(transport4_data_s{0, *(sockaddr_in*)&addr, std::move(buffer)});
+            }
+            continue;
         }
-        else
+
+        if (0 == n || EAGAIN == errno || EWOULDBLOCK == errno)
         {
-            transport_queue_pair->out.push(transport4_data_s{0, *(sockaddr_in*)&addr, std::move(buffer)});
+            break;
         }
+
+        log(*g_logger, E_LOG_BIT_ERROR, "udp_unicast_transport[%p]::on_sock_recv_ready: Failed to recv data! error=%d(%s)", this, errno, strerror(errno));
+        break;
     }
 }
 

@@ -1,11 +1,12 @@
 #ifndef BFC_TUNNEL_NODE_HPP
 #define BFC_TUNNEL_NODE_HPP
 
-#include <functional>
 #include <memory>
+#include <vector>
 
 #include <bfc_tunnel/bfc_tunnel_types.hpp>
-#include <bfc_tunnel/protocol.hpp>
+#include <bfc_tunnel/protocol/btprotocol.hpp>
+#include <bfc_tunnel/transport/transport_types.hpp>
 
 namespace bfc_tunnel
 {
@@ -13,44 +14,43 @@ namespace bfc_tunnel
 class node : public std::enable_shared_from_this<node>
 {
 public:
-    node(
-        cv_reactor_ptr_t reactor,
-        node_transport_queue_ptr_t transport_out,
-        transport_node_queue_ptr_t transport_in,
-        node_service_queue_ptr_t service_out,
-        service_node_queue_ptr_t service_in
-    );
+    explicit node(cv_reactor_ptr_t cv_reactor);
     ~node();
 
     void initialize();
     void uninitialize();
 
-private:
-    void on_transport_in_queue_ready();
-    void on_service_in_queue_ready();
+    void add_transport(transport_queue_pair_ptr_t transport);
 
-    void handle_transport_message(const header_s& header, const bfc::buffer_view& payload);
-    void handle_transport_message(const header_s& header, const id_request_s& payload);
-    void handle_transport_message(const header_s& header, const id_response_s& payload);
-    void handle_transport_message(const header_s& header, const link_info_s& payload);
-    void handle_transport_message(const header_s& header, const link_report_s& payload);
-    void handle_transport_message(const header_s& header, const route_announce_s& payload);
-    void handle_transport_message(const header_s& header, const hub_announce_s& payload);
-    void handle_transport_message(const header_s& header, const n2n_indication_s& payload);
-    void handle_transport_message(const header_s& header, const tunnel_data_s& payload);
+private:
+    void on_transport_out_ready(transport_queue_pair_ptr_t transport);
+
+    void handle_transport_out(const transport_identity_s& data);
+    void handle_transport_out(const transport_data_s& data);
+    void handle_transport_out(const transport4_data_s& data);
+    void handle_transport_out(const transport6_data_s& data);
+    void handle_transport_out(const transport_delivery_failure& data);
+
+    void handle_pdu(const bfc::const_buffer_view& pdu);
+
+    void handle_btp_message(const cum::BTPMessage& msg);
+    void handle_btp_message(const cum::beacon& msg);
+    void handle_btp_message(const cum::msg1& msg);
+    void handle_btp_message(const cum::msg2& msg);
+    void handle_btp_message(const cum::link_info& msg);
+    void handle_btp_message(const cum::link_report& msg);
+    void handle_btp_message(const cum::route_announce& msg);
+    void handle_btp_message(const cum::n2n_indication& msg);
 
     cv_reactor_ptr_t cv_reactor;
-    node_transport_queue_ptr_t transport_out;
-    transport_node_queue_ptr_t transport_in;
-    node_service_queue_ptr_t service_out;
-    service_node_queue_ptr_t service_in;
+    std::vector<transport_queue_pair_ptr_t> transports;
 
     enum node_state_e
     {
         E_NODE_STATE_UNINITIALIZED,
         E_NODE_STATE_INITIALIZED
     };
-    node_state_e state = E_NODE_STATE_INITIALIZED;
+    node_state_e state = E_NODE_STATE_UNINITIALIZED;
 };
 
 } // namespace bfc_tunnel

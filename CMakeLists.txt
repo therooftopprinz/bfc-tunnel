@@ -9,7 +9,7 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 
 # Pin to a specific upstream revision (see git ls-remote ... HEAD).
 set(BFC_GIT_REPOSITORY "https://github.com/therooftopprinz/bfc.git")
-set(BFC_GIT_TAG "bd5e0cce68e8aea8adc8e995b1ad23361e425d29")
+set(BFC_GIT_TAG "9fdf6e2789f0a76a0694f8c48002afb297c01e96")
 
 set(CUM_GIT_REPOSITORY "https://github.com/therooftopprinz/cum.git")
 set(CUM_GIT_TAG "e0d04b66b3512e14bccfacb730dd7e3421957fe5")

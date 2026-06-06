@@ -115,7 +115,8 @@ struct __attribute__((packed)) n2n_indication_s
 struct __attribute__((packed)) tunnel_data_s
 {};
 
-inline bool validate_header(const bfc::buffer_view& buffer)
+template<typename BufferView>
+inline bool validate_header(const BufferView& buffer)
 {
     if (buffer.size() < sizeof(header_s))
     {
@@ -167,9 +168,12 @@ inline bool validate_payload(const header_s& header, const T& payload)
     return true;
 }
 
-inline bfc::buffer_view payload_view(const header_s* header)
+inline bfc::const_buffer_view payload_view(const header_s& header, const bfc::const_buffer_view& buffer)
 {
-    return bfc::buffer_view(header + 1, header->size);
+    return bfc::const_buffer_view(
+        reinterpret_cast<const std::byte*>(buffer.data()) + sizeof(header_s),
+        header.size
+    );
 }
 
 } // namespace bfc_tunnel

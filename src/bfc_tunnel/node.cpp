@@ -1,4 +1,5 @@
 #include <bfc_tunnel/node.hpp>
+#include <bfc_tunnel/utils/cv_reactor_helper.hpp>
 #include <bfc_tunnel/utils/logger.hpp>
 
 #include <cinttypes>
@@ -18,7 +19,7 @@ node::~node()
 
 void node::initialize()
 {
-    cv_reactor->wake_up(
+    utils::dispatch_sync(*cv_reactor,
         [w = weak_from_this()]()
         {
             auto t = w.lock();
@@ -29,13 +30,16 @@ void node::initialize()
             }
 
             t->state = E_NODE_STATE_INITIALIZED;
+            port_id_counter = 0;
+            ports.clear();
+            port_refs.clear();
         }
     );
 }
 
 void node::uninitialize()
 {
-    cv_reactor->wake_up(
+    utils::dispatch_sync(*cv_reactor,
         [w = weak_from_this()]()
         {
             auto t = w.lock();
@@ -62,7 +66,7 @@ void node::add_transport(transport_queue_pair_ptr_t transport)
         return;
     }
 
-    cv_reactor->wake_up(
+    utils::dispatch_sync(*cv_reactor,
         [w = weak_from_this(), transport]()
         {
             auto t = w.lock();
@@ -72,65 +76,14 @@ void node::add_transport(transport_queue_pair_ptr_t transport)
                 return;
             }
 
-            t->transports.push_back(transport);
-            t->cv_reactor->add_read_rdy(
-                transport->out,
-                [w, transport]()
-                {
-                    auto t = w.lock();
-                    if (!t)
-                    {
-                        log(*g_logger, E_LOG_BIT_SHOULD_NOT_HAPPEN, "node[nullptr]::on_transport_out_ready: Weak pointer expired!");
-                        return;
-                    }
-                    t->on_transport_out_ready(transport);
-                }
-            );
+            auto port_id = t->port_id_counter++;
+            auto port = std::make_shared<port>(t->cv_reactor, port_id);
+            t->ports.emplace(port_id, port);
+            t->port_refs.emplace(transport.get(), port);
+            port->initialize(transport);
         }
     );
 }
-
-void node::on_transport_out_ready(transport_queue_pair_ptr_t transport)
-{
-    auto outs = transport->out.pop();
-    if (outs.empty())
-    {
-        return;
-    }
-
-    for (auto& out : outs)
-    {
-        std::visit([this](auto& e) { handle_transport_out(e); }, out);
-    }
-}
-
-void node::handle_transport_out(const transport_identity_s& data)
-{
-    log(*g_logger, E_LOG_BIT_INFO, "node[%p]::handle_transport_out: Transport identity type=%d address=%s",
-        this, static_cast<int>(data.type), data.address.c_str());
-}
-
-void node::handle_transport_out(const transport_data_s& data)
-{
-    handle_pdu(bfc::const_buffer_view(data.data));
-}
-
-void node::handle_transport_out(const transport4_data_s& data)
-{
-    handle_pdu(bfc::const_buffer_view(data.data));
-}
-
-void node::handle_transport_out(const transport6_data_s& data)
-{
-    handle_pdu(bfc::const_buffer_view(data.data));
-}
-
-void node::handle_transport_out(const transport_delivery_failure& data)
-{
-    log(*g_logger, E_LOG_BIT_ERROR, "node[%p]::handle_transport_out: Delivery failure id=%" PRIu64 " error=%d",
-        this, data.id, data.error);
-}
-
 void node::handle_pdu(const bfc::const_buffer_view& pdu)
 {
     if (pdu.empty())

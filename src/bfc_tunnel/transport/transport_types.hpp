@@ -49,7 +49,10 @@ struct transport6_data_s
     bfc::buffer  data;
 };
 
-using sockaddr_t = std::variant<sockaddr_in, sockaddr_in6>;
+struct sockaddr_none
+{};
+
+using sockaddr_t = std::variant<sockaddr_none, sockaddr_in, sockaddr_in6>;
 
 struct transport_delivery_failure
 {

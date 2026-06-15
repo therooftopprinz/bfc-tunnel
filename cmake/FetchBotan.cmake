@@ -1,6 +1,7 @@
 # Fetch and build Botan (Python configure.py + make; no upstream CMake target).
 include(FetchContent)
 include(ExternalProject)
+include(ProcessorCount)
 
 find_package(Python3 COMPONENTS Interpreter REQUIRED)
 
@@ -10,6 +11,23 @@ endif()
 
 if(NOT BOTAN_GIT_REPOSITORY OR NOT BOTAN_GIT_TAG)
   message(FATAL_ERROR "BOTAN_GIT_REPOSITORY and BOTAN_GIT_TAG must be set before including FetchBotan.cmake")
+endif()
+
+if(NOT BOTAN_BUILD_JOBS)
+  if(CMAKE_BUILD_PARALLEL_LEVEL GREATER 0)
+    set(BOTAN_BUILD_JOBS "${CMAKE_BUILD_PARALLEL_LEVEL}")
+  else()
+    ProcessorCount(BOTAN_BUILD_JOBS)
+    if(NOT BOTAN_BUILD_JOBS)
+      set(BOTAN_BUILD_JOBS 1)
+    endif()
+  endif()
+endif()
+set(BOTAN_BUILD_JOBS "${BOTAN_BUILD_JOBS}" CACHE STRING "Parallel jobs for building Botan")
+
+set(BOTAN_MAKE_PARALLEL_ARGS "")
+if(NOT CMAKE_MAKE_PROGRAM MATCHES "nmake")
+  list(APPEND BOTAN_MAKE_PARALLEL_ARGS "-j${BOTAN_BUILD_JOBS}")
 endif()
 
 set(BOTAN_ENABLE_MODULES "aes,chacha,x25519,ed25519,hmac,sha2_32,sha2_64,hkdf,system_rng"
@@ -43,9 +61,9 @@ ExternalProject_Add(bfc_tunnel_botan
     "--disable-shared-library"
     "--enable-modules=${BOTAN_ENABLE_MODULES}"
   BUILD_COMMAND
-    "${CMAKE_COMMAND}" -E chdir "${BOTAN_BUILD_DIR}" "${CMAKE_MAKE_PROGRAM}"
+    "${CMAKE_COMMAND}" -E chdir "${BOTAN_BUILD_DIR}" "${CMAKE_MAKE_PROGRAM}" ${BOTAN_MAKE_PARALLEL_ARGS}
   INSTALL_COMMAND
-    "${CMAKE_COMMAND}" -E chdir "${BOTAN_BUILD_DIR}" "${CMAKE_MAKE_PROGRAM}" install
+    "${CMAKE_COMMAND}" -E chdir "${BOTAN_BUILD_DIR}" "${CMAKE_MAKE_PROGRAM}" ${BOTAN_MAKE_PARALLEL_ARGS} install
   BUILD_BYPRODUCTS "${BOTAN_LIBRARY}"
   USES_TERMINAL_BUILD ON
   UPDATE_COMMAND ""

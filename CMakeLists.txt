@@ -9,7 +9,7 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 
 # Pin to a specific upstream revision (see git ls-remote ... HEAD).
 set(BFC_GIT_REPOSITORY "https://github.com/therooftopprinz/bfc.git")
-set(BFC_GIT_TAG "9fdf6e2789f0a76a0694f8c48002afb297c01e96")
+set(BFC_GIT_TAG "9cdd7ba78e088fdc70cef153de2f23b7646f8452")
 
 set(CUM_GIT_REPOSITORY "https://github.com/therooftopprinz/cum.git")
 set(CUM_GIT_TAG "e0d04b66b3512e14bccfacb730dd7e3421957fe5")
@@ -129,6 +129,7 @@ add_library(bfc_tunnel STATIC
   src/bfc_tunnel/transport/udp_unicast_transport.cpp
   src/bfc_tunnel/utils/logger.cpp
   src/bfc_tunnel/node.cpp
+  src/bfc_tunnel/port.cpp
   src/bfc_tunnel/route_manager.cpp
 )
 add_dependencies(bfc_tunnel generate_btprotocol)

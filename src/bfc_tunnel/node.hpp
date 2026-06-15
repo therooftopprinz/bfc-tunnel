@@ -6,7 +6,7 @@
 
 #include <bfc_tunnel/bfc_tunnel_types.hpp>
 #include <bfc_tunnel/protocol/btprotocol.hpp>
-#include <bfc_tunnel/transport/transport_types.hpp>
+#include <bfc_tunnel/port.hpp>
 
 namespace bfc_tunnel
 {
@@ -23,16 +23,7 @@ public:
     void add_transport(transport_queue_pair_ptr_t transport);
 
 private:
-    void on_transport_out_ready(transport_queue_pair_ptr_t transport);
-
-    void handle_transport_out(const transport_identity_s& data);
-    void handle_transport_out(const transport_data_s& data);
-    void handle_transport_out(const transport4_data_s& data);
-    void handle_transport_out(const transport6_data_s& data);
-    void handle_transport_out(const transport_delivery_failure& data);
-
     void handle_pdu(const bfc::const_buffer_view& pdu);
-
     void handle_btp_message(const cum::BTPMessage& msg);
     void handle_btp_message(const cum::beacon& msg);
     void handle_btp_message(const cum::msg1& msg);
@@ -43,7 +34,9 @@ private:
     void handle_btp_message(const cum::n2n_indication& msg);
 
     cv_reactor_ptr_t cv_reactor;
-    std::vector<transport_queue_pair_ptr_t> transports;
+    port_map_t ports;
+    port_rmap_t port_refs;
+    uint16_t port_id_counter = 0;
 
     enum node_state_e
     {

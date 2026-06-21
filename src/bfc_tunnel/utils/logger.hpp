@@ -71,7 +71,7 @@ BFC_TUNNEL_LOG_PRINTF_ATTR
 inline void log_with_prefix(logger& lg, uint64_t logbit, const char* format, ...)
 {
     thread_local static char rawline[1024 * 512];
-    thread_local static char fmtline[1024 * 512];
+    thread_local static char fmtline[1024 * 520];
 
     auto now = std::chrono::system_clock::now();
     auto now_ms = std::chrono::duration_cast<std::chrono::milliseconds>(now.time_since_epoch()).count();
@@ -98,8 +98,6 @@ inline void log_with_prefix(logger& lg, uint64_t logbit, const char* format, ...
     log_line_and_maybe_flush(lg, fmtline);
 }
 
-#undef BFC_TUNNEL_LOG_PRINTF_ATTR
-
 } // namespace detail
 
 inline void log(logger& lg, uint64_t logbit, const char* format)
@@ -118,8 +116,17 @@ void log(logger& lg, uint64_t logbit, const char* format, Args... args)
     {
         return;
     }
+#if defined(__GNUC__) || defined(__clang__)
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wformat-nonliteral"
+#endif
     detail::log_with_prefix(lg, logbit, format, args...);
+#if defined(__GNUC__) || defined(__clang__)
+#pragma GCC diagnostic pop
+#endif
 }
+
+#undef BFC_TUNNEL_LOG_PRINTF_ATTR
 
 #define IF_LB(logbit) if ((g_logger->get_logbit() & logbit) == logbit)
 

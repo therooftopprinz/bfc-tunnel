@@ -1,7 +1,7 @@
 #ifndef BFC_TUNNEL_TRANSPORT_TYPES_HPP
 #define BFC_TUNNEL_TRANSPORT_TYPES_HPP
 
-#include <bfc/buffer.hpp>
+#include <bfc/sized_buffer.hpp>
 #include <bfc/socket.hpp>
 #include <bfc/cv_reactor.hpp>
 
@@ -13,46 +13,21 @@
 namespace bfc_tunnel
 {
 
-enum transport_type_e
-{
-    E_TRANSPORT_TYPE_GENERIC_OVER_UDP4,
-    E_TRANSPORT_TYPE_UDP_MULTICAST,
-    E_TRANSPORT_TYPE_UDP_UNICAST,
-};
-
-struct transport_query_identity_s
-{};
-
-struct transport_identity_s
-{
-    transport_type_e         type;
-    std::string              address;
-};
-
-struct transport_data_s
-{
-    uint64_t id;
-    bfc::buffer data;
-};
-
-struct transport4_data_s
-{
-    uint64_t id;
-    sockaddr_in address;
-    bfc::buffer data;
-};
-
-struct transport6_data_s
-{
-    uint64_t id;
-    sockaddr_in6 address;
-    bfc::buffer  data;
-};
-
 struct sockaddr_none
 {};
 
-using sockaddr_t = std::variant<sockaddr_none, sockaddr_in, sockaddr_in6>;
+using sockaddr_t        = std::variant<sockaddr_none, sockaddr_in, sockaddr_in6>;
+using sock_buff_t       = bfc::sized_buffer;
+
+bool is_equal(const struct sockaddr *sa, const struct sockaddr *sb);
+bool is_equal(const sockaddr_t& a, const sockaddr_t& b);
+
+struct transport_data_s
+{
+    uint64_t    id;
+    sockaddr_t  address;
+    sock_buff_t data;
+};
 
 struct transport_delivery_failure
 {
@@ -61,28 +36,19 @@ struct transport_delivery_failure
     int error;
 };
 
-using transport_in_t  = std::variant<
-    transport_query_identity_s,
-    transport_data_s,
-    transport4_data_s,
-    transport6_data_s>;
-using transport_out_t = std::variant<
-    transport_identity_s,
-    transport_data_s,
-    transport4_data_s,
-    transport6_data_s,
-    transport_delivery_failure>;
+using transport_in_t  = transport_data_s;
+using transport_out_t = std::variant<transport_data_s, transport_delivery_failure>;
 
 using transport_in_queue_t  = bfc::reactive_event_queue<transport_in_t,  reactor_cb_t>;
 using transport_out_queue_t = bfc::reactive_event_queue<transport_out_t, reactor_cb_t>;
 
-struct transport_queue_pair_t
+struct transport_queue_pair_s
 {
     transport_in_queue_t in;
     transport_out_queue_t out;
 };
 
-using transport_queue_pair_ptr_t = std::shared_ptr<transport_queue_pair_t>;
+using transport_queue_pair_ptr_t = std::shared_ptr<transport_queue_pair_s>;
 
 } // namespace bfc_tunnel
 

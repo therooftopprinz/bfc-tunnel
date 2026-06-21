@@ -28,32 +28,27 @@ public:
     );
     ~udp_unicast_transport();
 
-    void initialize();
+    void initialize(const udp_unicast_transport_config_s& config);
     void deinitialize();
-    void configure(const udp_unicast_transport_config_s& config);
 
 private:
     void on_in_queue_ready();
     void on_sock_recv_ready();
 
-    void handle(const transport_query_identity_s& data);
     void handle(const transport_data_s& data);
-    void handle(const transport4_data_s& data);
-    void handle(const transport6_data_s& data);
 
     io_reactor_ptr_t io_reactor;
     cv_reactor_ptr_t cv_reactor;
     transport_queue_pair_ptr_t transport_queue_pair;
 
-    udp_unicast_transport_config_s config;
     bfc::socket sock;
     bool is_v6 = false;
+    udp_unicast_transport_config_s config;
 
     enum transport_state_e
     {
         E_TRANSPORT_STATE_UNINITIALIZED,
-        E_TRANSPORT_STATE_INITIALIZED,
-        E_TRANSPORT_STATE_CONFIGURED
+        E_TRANSPORT_STATE_INITIALIZED
     };
 
     std::atomic<transport_state_e> state = E_TRANSPORT_STATE_UNINITIALIZED;

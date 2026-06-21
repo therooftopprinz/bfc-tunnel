@@ -1,5 +1,5 @@
 # Points clangd at the CMake-generated compilation database. Configure with:
 #   cmake -S . -B build
-# If you use a different build directory, update CompilationDatabase below.
+# compile_commands.json at the repo root symlinks to build/compile_commands.json.
 CompileFlags:
   CompilationDatabase: build

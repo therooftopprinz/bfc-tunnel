@@ -126,10 +126,10 @@ set_source_files_properties("${BTPROTOCOL_OUTPUT}" PROPERTIES GENERATED TRUE)
 add_custom_target(generate_btprotocol DEPENDS "${BTPROTOCOL_OUTPUT}")
 
 add_library(bfc_tunnel STATIC
+  src/bfc_tunnel/transport/transport_types.cpp
   src/bfc_tunnel/transport/udp_unicast_transport.cpp
   src/bfc_tunnel/utils/logger.cpp
   src/bfc_tunnel/node.cpp
-  src/bfc_tunnel/port.cpp
   src/bfc_tunnel/route_manager.cpp
 )
 add_dependencies(bfc_tunnel generate_btprotocol)

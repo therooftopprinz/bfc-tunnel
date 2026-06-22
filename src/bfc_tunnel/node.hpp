@@ -2,6 +2,7 @@
 #define BFC_TUNNEL_NODE_HPP
 
 #include "bfc/sized_buffer.hpp"
+#include "bfc_tunnel/protocol/frame.hpp"
 #include <cstdint>
 #include <deque>
 #include <memory>
@@ -168,17 +169,18 @@ private:
     void rem_beacon(const sockaddr_t&);
 
     void on_beacon_timer_expired(beacon_ptr_t beacon);
+    void send_beacon(beacon_ptr_t beacon);
 
     void on_port_in_queue_ready(port_ptr_t port);
     void handle_pdu(const port_ptr_t& port, const sock_buff_t& pdu);
-    void handle_btp_message(const port_ptr_t& port, const cum::BTPMessage& msg);
-    void handle_btp_message(const port_ptr_t& port, const cum::beacon& msg);
-    void handle_btp_message(const port_ptr_t& port, const cum::msg1& msg);
-    void handle_btp_message(const port_ptr_t& port, const cum::msg2& msg);
-    void handle_btp_message(const port_ptr_t& port, const cum::link_info& msg);
-    void handle_btp_message(const port_ptr_t& port, const cum::link_report& msg);
-    void handle_btp_message(const port_ptr_t& port, const cum::route_announce& msg);
-    void handle_btp_message(const port_ptr_t& port, const cum::n2n_indication& msg);
+    void handle_btp_message(const port_ptr_t& port,const frame_const_t& frame, cum::beacon& msg);
+    void handle_btp_message(const port_ptr_t& port,const frame_const_t& frame, cum::msg1& msg);
+    void handle_btp_message(const port_ptr_t& port,const frame_const_t& frame, cum::msg2& msg);
+    void handle_btp_message(const port_ptr_t& port,const frame_const_t& frame, cum::exchange_network_keys& msg);
+    void handle_btp_message(const port_ptr_t& port,const frame_const_t& frame, cum::link_info& msg);
+    void handle_btp_message(const port_ptr_t& port,const frame_const_t& frame, cum::link_report& msg);
+    void handle_btp_message(const port_ptr_t& port,const frame_const_t& frame, cum::route_announce& msg);
+    void handle_btp_message(const port_ptr_t& port,const frame_const_t& frame, cum::n2n_indication& msg);
 
     cv_reactor_ptr_t cv_reactor;
 
@@ -189,6 +191,8 @@ private:
     };
 
     node_state_e state = E_NODE_STATE_UNINITIALIZED;
+
+    node_id_t node_id = 0;
 
     peer_by_node_id_map       peers;
     std::vector<port_ptr_t>   ports;

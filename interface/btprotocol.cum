@@ -1,15 +1,20 @@
 using key_t = dynamic<u8, 256>;
 
 sequence beacon
+{};
+
+enumeration dh_key_type_e
 {
-    u32 node_id;
+    E_DHKT_NONE,
+    E_DHKT_X25519,
+    E_DHKT_SECP256R1,
+    E_DHKT_CURVE448
 };
 
 sequence msg1
 {
     u8 sec_ctx;
-    u8 confidentiality_algorithm;
-    u8 integrity_algorithm;
+    u8 dh_key_type;
     key_t ephemeral;
     key_t signature;
 };
@@ -79,16 +84,4 @@ sequence n2n_indication
     u32 target,
     u32 hostv4,
     u16 port
-};
-
-choice BTPMessage
-{
-    beacon,
-    msg1,
-    msg2,
-    exchange_network_keys,
-    link_info,
-    link_report,
-    route_announce,
-    n2n_indication
 };

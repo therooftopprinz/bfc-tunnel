@@ -15,14 +15,20 @@ namespace cum
 using key_t = cum::vector<u8, 256>;
 struct beacon
 {
-    u32 node_id;
+};
+
+enum dh_key_type_e
+{
+    E_DHKT_NONE,
+    E_DHKT_X25519,
+    E_DHKT_SECP256R1,
+    E_DHKT_CURVE448
 };
 
 struct msg1
 {
     u8 sec_ctx;
-    u8 confidentiality_algorithm;
-    u8 integrity_algorithm;
+    u8 dh_key_type;
     key_t ephemeral;
     key_t signature;
 };
@@ -92,7 +98,6 @@ struct n2n_indication
     u16 port;
 };
 
-using BTPMessage = std::variant<beacon,msg1,msg2,exchange_network_keys,link_info,link_report,route_announce,n2n_indication>;
 /***********************************************
 /
 /            Codec Definitions
@@ -102,13 +107,11 @@ using BTPMessage = std::variant<beacon,msg1,msg2,exchange_network_keys,link_info
 inline void encode_per(const beacon& pIe, cum::per_codec_ctx& pCtx)
 {
     using namespace cum;
-    encode_per(pIe.node_id, pCtx);
 }
 
 inline void decode_per(beacon& pIe, cum::per_codec_ctx& pCtx)
 {
     using namespace cum;
-    decode_per(pIe.node_id, pCtx);
 }
 
 inline void str(const char* pName, const beacon& pIe, std::string& pCtx, bool pIsLast)
@@ -123,8 +126,25 @@ inline void str(const char* pName, const beacon& pIe, std::string& pCtx, bool pI
         pCtx = pCtx + "\"" + pName + "\":{";
     }
     size_t nOptional = 0;
-    size_t nMandatory = 1;
-    str("node_id", pIe.node_id, pCtx, !(--nMandatory+nOptional));
+    size_t nMandatory = 0;
+    pCtx = pCtx + "}";
+    if (!pIsLast)
+    {
+        pCtx += ",";
+    }
+}
+
+inline void str(const char* pName, const dh_key_type_e& pIe, std::string& pCtx, bool pIsLast)
+{
+    using namespace cum;
+    if (pName)
+    {
+        pCtx = pCtx + "\"" + pName + "\":";
+    }
+    if (dh_key_type_e::E_DHKT_NONE == pIe) pCtx += "\"E_DHKT_NONE\"";
+    if (dh_key_type_e::E_DHKT_X25519 == pIe) pCtx += "\"E_DHKT_X25519\"";
+    if (dh_key_type_e::E_DHKT_SECP256R1 == pIe) pCtx += "\"E_DHKT_SECP256R1\"";
+    if (dh_key_type_e::E_DHKT_CURVE448 == pIe) pCtx += "\"E_DHKT_CURVE448\"";
     pCtx = pCtx + "}";
     if (!pIsLast)
     {
@@ -136,8 +156,7 @@ inline void encode_per(const msg1& pIe, cum::per_codec_ctx& pCtx)
 {
     using namespace cum;
     encode_per(pIe.sec_ctx, pCtx);
-    encode_per(pIe.confidentiality_algorithm, pCtx);
-    encode_per(pIe.integrity_algorithm, pCtx);
+    encode_per(pIe.dh_key_type, pCtx);
     encode_per(pIe.ephemeral, pCtx);
     encode_per(pIe.signature, pCtx);
 }
@@ -146,8 +165,7 @@ inline void decode_per(msg1& pIe, cum::per_codec_ctx& pCtx)
 {
     using namespace cum;
     decode_per(pIe.sec_ctx, pCtx);
-    decode_per(pIe.confidentiality_algorithm, pCtx);
-    decode_per(pIe.integrity_algorithm, pCtx);
+    decode_per(pIe.dh_key_type, pCtx);
     decode_per(pIe.ephemeral, pCtx);
     decode_per(pIe.signature, pCtx);
 }
@@ -164,10 +182,9 @@ inline void str(const char* pName, const msg1& pIe, std::string& pCtx, bool pIsL
         pCtx = pCtx + "\"" + pName + "\":{";
     }
     size_t nOptional = 0;
-    size_t nMandatory = 5;
+    size_t nMandatory = 4;
     str("sec_ctx", pIe.sec_ctx, pCtx, !(--nMandatory+nOptional));
-    str("confidentiality_algorithm", pIe.confidentiality_algorithm, pCtx, !(--nMandatory+nOptional));
-    str("integrity_algorithm", pIe.integrity_algorithm, pCtx, !(--nMandatory+nOptional));
+    str("dh_key_type", pIe.dh_key_type, pCtx, !(--nMandatory+nOptional));
     str("ephemeral", pIe.ephemeral, pCtx, !(--nMandatory+nOptional));
     str("signature", pIe.signature, pCtx, !(--nMandatory+nOptional));
     pCtx = pCtx + "}";
@@ -504,185 +521,6 @@ inline void str(const char* pName, const n2n_indication& pIe, std::string& pCtx,
     str("hostv4", pIe.hostv4, pCtx, !(--nMandatory+nOptional));
     str("port", pIe.port, pCtx, !(--nMandatory+nOptional));
     pCtx = pCtx + "}";
-    if (!pIsLast)
-    {
-        pCtx += ",";
-    }
-}
-
-inline void encode_per(const BTPMessage& pIe, cum::per_codec_ctx& pCtx)
-{
-    using namespace cum;
-    using TypeIndex = uint8_t;
-    TypeIndex type = pIe.index();
-    encode_per(type, pCtx);
-    if (0 == type)
-    {
-        encode_per(std::get<0>(pIe), pCtx);
-    }
-    else if (1 == type)
-    {
-        encode_per(std::get<1>(pIe), pCtx);
-    }
-    else if (2 == type)
-    {
-        encode_per(std::get<2>(pIe), pCtx);
-    }
-    else if (3 == type)
-    {
-        encode_per(std::get<3>(pIe), pCtx);
-    }
-    else if (4 == type)
-    {
-        encode_per(std::get<4>(pIe), pCtx);
-    }
-    else if (5 == type)
-    {
-        encode_per(std::get<5>(pIe), pCtx);
-    }
-    else if (6 == type)
-    {
-        encode_per(std::get<6>(pIe), pCtx);
-    }
-    else if (7 == type)
-    {
-        encode_per(std::get<7>(pIe), pCtx);
-    }
-}
-
-inline void decode_per(BTPMessage& pIe, cum::per_codec_ctx& pCtx)
-{
-    using namespace cum;
-    using TypeIndex = uint8_t;
-    TypeIndex type;
-    decode_per(type, pCtx);
-    if (0 == type)
-    {
-        pIe = beacon();
-        decode_per(std::get<0>(pIe), pCtx);
-    }
-    else if (1 == type)
-    {
-        pIe = msg1();
-        decode_per(std::get<1>(pIe), pCtx);
-    }
-    else if (2 == type)
-    {
-        pIe = msg2();
-        decode_per(std::get<2>(pIe), pCtx);
-    }
-    else if (3 == type)
-    {
-        pIe = exchange_network_keys();
-        decode_per(std::get<3>(pIe), pCtx);
-    }
-    else if (4 == type)
-    {
-        pIe = link_info();
-        decode_per(std::get<4>(pIe), pCtx);
-    }
-    else if (5 == type)
-    {
-        pIe = link_report();
-        decode_per(std::get<5>(pIe), pCtx);
-    }
-    else if (6 == type)
-    {
-        pIe = route_announce();
-        decode_per(std::get<6>(pIe), pCtx);
-    }
-    else if (7 == type)
-    {
-        pIe = n2n_indication();
-        decode_per(std::get<7>(pIe), pCtx);
-    }
-}
-
-inline void str(const char* pName, const BTPMessage& pIe, std::string& pCtx, bool pIsLast)
-{
-    using namespace cum;
-    using TypeIndex = uint8_t;
-    TypeIndex type = pIe.index();
-    if (0 == type)
-    {
-        if (pName)
-            pCtx += std::string(pName) + ":{";
-        else
-            pCtx += "{";
-        std::string name = "beacon";
-        str(name.c_str(), std::get<0>(pIe), pCtx, true);
-        pCtx += "}";
-    }
-    else if (1 == type)
-    {
-        if (pName)
-            pCtx += std::string(pName) + ":{";
-        else
-            pCtx += "{";
-        std::string name = "msg1";
-        str(name.c_str(), std::get<1>(pIe), pCtx, true);
-        pCtx += "}";
-    }
-    else if (2 == type)
-    {
-        if (pName)
-            pCtx += std::string(pName) + ":{";
-        else
-            pCtx += "{";
-        std::string name = "msg2";
-        str(name.c_str(), std::get<2>(pIe), pCtx, true);
-        pCtx += "}";
-    }
-    else if (3 == type)
-    {
-        if (pName)
-            pCtx += std::string(pName) + ":{";
-        else
-            pCtx += "{";
-        std::string name = "exchange_network_keys";
-        str(name.c_str(), std::get<3>(pIe), pCtx, true);
-        pCtx += "}";
-    }
-    else if (4 == type)
-    {
-        if (pName)
-            pCtx += std::string(pName) + ":{";
-        else
-            pCtx += "{";
-        std::string name = "link_info";
-        str(name.c_str(), std::get<4>(pIe), pCtx, true);
-        pCtx += "}";
-    }
-    else if (5 == type)
-    {
-        if (pName)
-            pCtx += std::string(pName) + ":{";
-        else
-            pCtx += "{";
-        std::string name = "link_report";
-        str(name.c_str(), std::get<5>(pIe), pCtx, true);
-        pCtx += "}";
-    }
-    else if (6 == type)
-    {
-        if (pName)
-            pCtx += std::string(pName) + ":{";
-        else
-            pCtx += "{";
-        std::string name = "route_announce";
-        str(name.c_str(), std::get<6>(pIe), pCtx, true);
-        pCtx += "}";
-    }
-    else if (7 == type)
-    {
-        if (pName)
-            pCtx += std::string(pName) + ":{";
-        else
-            pCtx += "{";
-        std::string name = "n2n_indication";
-        str(name.c_str(), std::get<7>(pIe), pCtx, true);
-        pCtx += "}";
-    }
     if (!pIsLast)
     {
         pCtx += ",";

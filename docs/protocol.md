@@ -37,22 +37,25 @@ Multicast and unicast transport use different media but are equivalent for **BFC
 ## [Core.Framing] Framing
 
 ### [Core.Framing.BTF] BFC Tunnel Frame
-| Size | Type  | Field         | Description                    | Notes  |
-|------|-------|---------------|--------------------------------|--------|
-| 1    | `u1`  | `reserved`    | Reserved                       |        |
-| -    | `u5`  | `version`     | Protocol Version               |        |
-| -    | `u2`  | `frame_type`  | Frame Type                     |        |
-| 1    | `u8`  | `sec_ctx`     | Security Context               |        |
-| 1    | `u8`  | `ttl`         | Time-to-live                   |        |
-| 4    | `u32` | `sn`          | Sequence Number                |        |
-| 4    | `u32` | `ts`          | Epoch Second                   |        |
-| 4    | `u32` | `src`         | Source NodeId                  |        |
-| 4    | `u32` | `dst`         | Destination NodeId             |        |
-| s(x) | `x`   | `mac`         | Message Authentication Code    | [1]    |
-| N    | `u8[]`| `payload`     | Payload                        |        |
+| Size | Type  | Field         | Description                          | Notes |
+|------|-------|---------------|--------------------------------------|-------|
+| 1    | `u8`  | `ttl`         | Time-to-live                         |       |
+| 1    | `u1`  | `reserved`    | Reserved                             |       |
+| -    | `u5`  | `version`     | Protocol Version                     |       |
+| -    | `u2`  | `frame_type`  | Frame Type                           |       |
+| 1    | `u8`  | `sec_ctx`     | Security Key Context                 |       |
+| 1    | `u4`  | `int_algo`    | Integrity Protection Algorithm       |       |
+| -    | `u4`  | `conf_algo`   | Confidentiality Protection Algorithm |       |
+| s(x) | `x`   | `mac`         | Message Authentication Code          | [1]   |
+| 4    | `u32` | `sn`          | Sequence Number                      |       |
+| 4    | `u32` | `ts`          | Epoch Second                         |       |
+| 4    | `u32` | `src`         | Source NodeId                        |       |
+| 4    | `u32` | `dst`         | Destination NodeId                   |       |
+| 1    | `u8`  | `type`        | Payload Type                         |       |
+| N    | `u8[]`| `payload`     | Payload                              |       |
 
 *Notes:*<br/>
-*1. `x = mac_size(sec_ctx)`*<br/>
+*1. `x = 0` when `sec_ctx = 0`; otherwise `x = mac_size(int_algo)`*<br/>
 
 ---
 
@@ -70,14 +73,18 @@ Frame types include *Peer*, which is used in bootstrapping network configuration
 ### [Core.Framing.BTF.fields] Fields
 Fields are encoded in network byte order (big-endian). Bit-fields that share a byte are packed most-significant-bit first as shown in the table.
 
+- `ttl` is decremented by each forwarding hop; frames reaching `ttl = 0` MUST be dropped.
+- `reserved` is reserved for future use and MUST be set to zero on transmission.
 - `version` MUST match the negotiated protocol version.
-- `frame_type` selects the frame interpretation.
-- `sec_ctx` selects the active integrity and confidentiality algorithm, and keying/material used to validate and decrypt the frame.
-- `ttl` is decremented by each forwarding hop, and frames reaching `ttl = 0` MUST be dropped.
-- `mac` length is derived from `sec_ctx` (`mac_size(sec_ctx)`).
+- `frame_type` selects the frame interpretation (see Frame Types).
+- `sec_ctx` selects the security key context and keying material used to validate and decrypt the frame. A value of `0` indicates plaintext (no MAC, confidentiality, or integrity protection).
+- `int_algo` selects the integrity protection algorithm used to compute and verify `mac`.
+- `conf_algo` selects the confidentiality protection algorithm applied to `payload` when `sec_ctx` is non-zero.
+- `mac` length is zero when `sec_ctx` is `0`; otherwise it is `mac_size(int_algo)` bytes.
 - `sn` and `ts` provide replay-window and freshness inputs.
 - `src` and `dst` are overlay Node IDs used for routing and policy checks.
-- `payload` frame payload.
+- `type` selects the payload interpretation (see Message Types).
+- `payload` is the PER-encoded message body for the selected `type`, or the ciphertext thereof when confidentiality protection is active.
 
 ---
 
@@ -140,62 +147,54 @@ in this case the later MSG1 should be cancelled to let the earlier MSG1 complete
 **Key Exchange Handshake**
 
 ```mermaid
+---
+config:
+  theme: redux-color
+---
 sequenceDiagram
 title Key Exchange
-     
   participant A as Alice
   participant B as Bob
 
-  Note over A: known: a = Alice's Private Key
-  Note over B: known: A = Alice's Public Key
-  Note over B: known: b = Bob's Private Key
-  Note over A: known: B = Bob's Public Key
+  Note over A,B:   A = Alice's Public Key
+  Note over A,B:   B = Bob's Public Key
+  Note over A:     a = Alice's Private Key
+  Note over A: dh_aB = DH(a, B) 
+  Note over B:     b = Bob's Private Key
+  Note over B: dh_Ab = DH(A, b) 
+
+  Note over A: Generate Alice Ephemeral Keys
 
   Note over A: e = Alice's Private Ephemeral Key
-  Note over B: f = Bob's Private Ephemeral Key
+  Note over A: dh_eB = DH(e, B) 
 
   A -->> B: Msg1(E)
   Note over B: E = Alice's Public Ephemeral Key
-  
-  Note over A: Aes = DH(e, B) # eS
-  Note over B: Bes = DH(E, b) # Es
-  Note over A,B: Aes == Bes == es
+  Note over B: dh_Eb = DH(E, b) 
+  Note over B: dh_Ef = DH(E, f) 
 
-  Note over A: Ass = DH(a, B) # sS
-  Note over B: Bss = DH(A, b) # Ss
-  Note over A,B: Ass == Bss == ss
+  Note over A,B: dh_eB == dh_Eb == dh_eb
+  Note over A,B: dh_aB == dh_Ab == dh_ab
+
+  Note over B: Generate Bob Ephemeral Keys
+  Note over B: f = Bob's Private Ephemeral Key
+  Note over B: dh_Af = DH(A, f) 
 
   B -->> A: Msg2(F)
   Note over A: F = Bob's Public Ephemeral Key
-  
-  Note over A: Aee = DH(e, F) # eE
-  Note over B: Bee = DH(E, f) # Ee
-  Note over A,B: Aee == Bee == ee
+  Note over A: dh_eF = DH(e, F) 
+  Note over A: dh_aF = DH(a, F) 
 
-  Note over A: Bse = DH(a, F) # sE
-  Note over B: Ase = DH(A, f) # Se
-  Note over A,B: Ase == Bse == se
+  Note over A,B: dh_eF == dh_Ef == dh_ef
+  Note over A,B: dh_Af == dh_aF == dh_af
 
-  Note over B: Bck0 = HASH(B)
-  Note over A: Ack0 = HASH(B)
-  Note over A,B: Ack0 == Bck0 == ck0
+  Note over A,B: Calculate Mix Key
 
-  Note over B: Bck1 = MixKey(Bck0, Bes)
-  Note over A: Ack1 = MixKey(Ack0, Aes)
-  Note over A,B: Ack1 == Bck1 == ck1
-
-  Note over B: Bck2 = MixKey(Bck1, Bss)
-  Note over A: Ack2 = MixKey(Ack1, Ass)
-  Note over A,B: Ack2 == Bck2 == ck2
-
-  Note over B: Bck3 = MixKey(Bck2, Bee)
-  Note over A: Ack3 = MixKey(Ack2, Aee)
-  Note over A,B: Ack3 == Bck3 == ck3
-
-  Note over B: Bck4 = MixKey(Bck3, Bse)
-  Note over A: Ack4 = MixKey(Ack3, Ase)
-  Note over A,B: Ack4 == Bck4 == ck4
-
+  Note over A,B: ck0 = HASH(HASH(HASH("BTF") || A) || B)
+  Note over A,B: ck1 = MixKey(ck0, dh_eb)
+  Note over A,B: ck2 = MixKey(ck1, dh_ab)
+  Note over A,B: ck3 = MixKey(ck2, dh_ef)
+  Note over A,B: ck4 = MixKey(ck3, dh_af)
   Note over A,B: ks, kr = HKDF(ck4, 0, 2)
   ```
 
@@ -295,32 +294,21 @@ Sent on all transport types to identify active neighboring nodes.
 
 ---
 
-**Choice: `BTPMessage`**
-
-| Variant | Description |
-|---------|-------------|
-| beacon | Neighbor discovery beacon. |
-| msg1 | Handshake/auth message 1. |
-| msg2 | Handshake/auth message 2. |
-| link_info | Link telemetry counters. |
-| link_report | Link quality report. |
-| route_announce | Route distribution message. |
-| n2n_indication | Node-to-node endpoint indication. |
-
 ### [Core.Messages.MessageTypes] Message Types
 
----
+| Value | Frame   | Name                   | Description                                                                                                        |
+|-------|---------|------------------------|--------------------------------------------------------------------------------------------------------------------|
+| 0x00  | PUBLIC  | BEACON                 | Used to broadcast active NodeId                                                                                    |
+| 0x01  | PEER    | MSG1                   | Used to send initiator's emphemeral key.                                                                           |
+| 0x02  | PEER    | MSG2                   | Used to send responder's emphemeral key.                                                                           |
+| 0x03  | PEER    | LINK_INFO              | Link telemetry counters.                                                                                           |
+| 0x04  | PEER    | LINK_REPORT            | Link quality report.                                                                                               |
+| 0x05  | NETWORK | ROUTE_ANNOUNCE         | Route distribution message.                                                                                        |
+| 0x06  | NETWORK | N2N_INDICATION         | Node-to-node endpoint indication.                                                                                  |
+| 0x07  | NETWORK | TUNNEL_DATA            | Opaque tunnel payload.                                                                                             |
+| 0x08  | PEER    | EXCHANGE_NETWORK_KEYS  | Network key exchange between peers.                                                                                  |
 
-| Value | Frame   | Name           | Description                                                                                                        |
-|-------|---------|----------------|--------------------------------------------------------------------------------------------------------------------|
-| 0x00  | PUBLIC  | BEACON         | Used to broadcast active NodeId                                                                                    |
-| 0x01  | PEER    | MSG1           | Used to send initiator's emphemeral key.                                                                           |
-| 0x02  | PEER    | MSG2           | Used to send responder's emphemeral key.                                                                           |
-| 0x03  | PEER    | LINK_INFO      | |
-| 0x04  | PEER    | LINK_REPORT    | |
-| 0x04  | NETWORK | ROUTE_ANNOUNCE | |
-| 0x06  | NETWORK | N2N_INDICATION | |
-| 0x07  | NETWORK | TUNNEL_DATA    | |
+---
 
 # WIP - IGNORE BELOW
 ------------------

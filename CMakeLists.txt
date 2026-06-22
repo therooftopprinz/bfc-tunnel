@@ -3,7 +3,7 @@ project(bfc_tunnel LANGUAGES CXX)
 
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
-set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
@@ -125,6 +125,19 @@ set_source_files_properties("${BTPROTOCOL_OUTPUT}" PROPERTIES GENERATED TRUE)
 
 add_custom_target(generate_btprotocol DEPENDS "${BTPROTOCOL_OUTPUT}")
 
+set(BFC_TUNNEL_COMPILE_WARNINGS
+    $<$<CXX_COMPILER_ID:GNU,Clang,AppleClang>:-Wall;-Wextra;-Wformat=2>)
+
+add_library(bfc_tunnel_security STATIC
+  src/bfc_tunnel/security/dh.cpp
+  src/bfc_tunnel/security/x25519_dh.cpp
+)
+target_include_directories(bfc_tunnel_security PUBLIC
+  "${CMAKE_CURRENT_SOURCE_DIR}/src"
+)
+target_link_libraries(bfc_tunnel_security PUBLIC bfc_headers botan::botan-static)
+target_compile_options(bfc_tunnel_security PRIVATE ${BFC_TUNNEL_COMPILE_WARNINGS})
+
 add_library(bfc_tunnel STATIC
   src/bfc_tunnel/transport/transport_types.cpp
   src/bfc_tunnel/transport/udp_unicast_transport.cpp
@@ -138,13 +151,19 @@ target_include_directories(bfc_tunnel PUBLIC
   "${CMAKE_CURRENT_SOURCE_DIR}/src"
   "${cum_SOURCE_DIR}/target_cpp"
 )
-target_link_libraries(bfc_tunnel PUBLIC bfc_headers botan::botan-static)
+target_link_libraries(bfc_tunnel PUBLIC bfc_headers bfc_tunnel_security botan::botan-static)
 
-set(BFC_TUNNEL_COMPILE_WARNINGS
-    $<$<CXX_COMPILER_ID:GNU,Clang,AppleClang>:-Wall;-Wextra;-Wformat=2>)
 target_compile_options(bfc_tunnel PRIVATE ${BFC_TUNNEL_COMPILE_WARNINGS})
 
 enable_testing()
+
+add_executable(dh_tests
+  src/tests/dh_tests.cpp
+  src/tests/gtestmain.cpp
+)
+target_link_libraries(dh_tests PRIVATE GTest::gtest bfc_tunnel_security)
+target_compile_options(dh_tests PRIVATE ${BFC_TUNNEL_COMPILE_WARNINGS})
+add_test(NAME dh_tests COMMAND dh_tests)
 
 add_executable(bfc_tunnel_tests
   src/tests/protocol_tests.cpp

@@ -13,6 +13,7 @@ namespace
 using bfc::buffer_view;
 using bfc_tunnel::E_FRAME_TYPE_NETWORK;
 using bfc_tunnel::E_FRAME_TYPE_PUBLIC;
+using bfc_tunnel::E_PAYLOAD_TYPE_BEACON;
 using bfc_tunnel::frame_const_t;
 using bfc_tunnel::frame_t;
 using bfc_tunnel::k_frame_protocol_version;
@@ -27,7 +28,17 @@ buffer_view view_of(std::array<std::byte, 256>& storage, std::size_t used)
 
 } // namespace
 
-TEST(frame_header, packs_version_and_frame_type_in_first_byte)
+TEST(frame_header, stores_ttl_in_first_byte)
+{
+    std::array<std::byte, 256> storage{};
+    frame_t frame(reinterpret_cast<uint8_t*>(storage.data()), storage.size());
+    frame.set_ttl(8);
+
+    EXPECT_EQ(frame.get_ttl(), 8);
+    EXPECT_EQ(static_cast<uint8_t>(storage[0]), 0x08);
+}
+
+TEST(frame_header, packs_version_and_frame_type_in_second_byte)
 {
     std::array<std::byte, 256> storage{};
     frame_t frame(reinterpret_cast<uint8_t*>(storage.data()), storage.size());
@@ -36,22 +47,22 @@ TEST(frame_header, packs_version_and_frame_type_in_first_byte)
 
     EXPECT_EQ(frame.get_version(), 5);
     EXPECT_EQ(frame.get_frame_type(), E_FRAME_TYPE_NETWORK);
-    EXPECT_EQ(static_cast<uint8_t>(storage[0]), 0b00010101);
+    EXPECT_EQ(static_cast<uint8_t>(storage[1]), 0b00010101);
 }
 
-TEST(frame_header, packs_conf_and_inte_algo_in_fourth_byte)
+TEST(frame_header, packs_int_and_conf_algo_in_fourth_byte)
 {
     std::array<std::byte, 256> storage{};
     frame_t frame(reinterpret_cast<uint8_t*>(storage.data()), storage.size());
-    frame.set_conf_algo(0xA);
-    frame.set_inte_algo(0x5);
+    frame.set_int_algo(0xA);
+    frame.set_conf_algo(0x5);
 
-    EXPECT_EQ(frame.get_conf_algo(), 0xA);
-    EXPECT_EQ(frame.get_inte_algo(), 0x5);
+    EXPECT_EQ(frame.get_int_algo(), 0xA);
+    EXPECT_EQ(frame.get_conf_algo(), 0x5);
     EXPECT_EQ(static_cast<uint8_t>(storage[3]), 0xA5);
 }
 
-TEST(frame_header, stores_u32_fields_big_endian)
+TEST(frame_header, stores_u32_fields_big_endian_after_mac)
 {
     std::array<std::byte, 256> storage{};
     frame_t frame(reinterpret_cast<uint8_t*>(storage.data()), storage.size());
@@ -72,12 +83,33 @@ TEST(frame_header, stores_u32_fields_big_endian)
     EXPECT_EQ(raw[16], 0x0D);
 }
 
+TEST(frame_header, shifts_u32_fields_after_mac)
+{
+    std::array<std::byte, 256> storage{};
+    frame_t frame(reinterpret_cast<uint8_t*>(storage.data()), storage.size(), 4);
+    frame.set_sn(0x01020304);
+
+    const uint8_t* raw = reinterpret_cast<const uint8_t*>(storage.data());
+    EXPECT_EQ(raw[8], 0x01);
+    EXPECT_EQ(frame.get_mac() - raw, 4);
+}
+
 TEST(frame_header, reports_payload_size_after_fixed_header)
 {
     std::array<std::byte, 256> storage{};
     frame_t frame(reinterpret_cast<uint8_t*>(storage.data()), 32);
-    EXPECT_EQ(frame.get_header_size(), frame_const_t::k_fixed_header_size);
-    EXPECT_EQ(frame.get_payload_size(), 32 - frame_const_t::k_fixed_header_size);
+    EXPECT_EQ(frame.get_header_size(), frame_const_t::k_fixed_header_size + frame_const_t::k_payload_type_size);
+    EXPECT_EQ(frame.get_payload_size(), 32 - frame.get_header_size());
+}
+
+TEST(frame_header, stores_payload_type_before_payload)
+{
+    std::array<std::byte, 256> storage{};
+    frame_t frame(reinterpret_cast<uint8_t*>(storage.data()), storage.size());
+    frame.set_payload_type(E_PAYLOAD_TYPE_BEACON);
+
+    EXPECT_EQ(frame.get_payload_type(), E_PAYLOAD_TYPE_BEACON);
+    EXPECT_EQ(static_cast<uint8_t>(storage[frame_const_t::k_fixed_header_size]), 0x00);
 }
 
 TEST(frame_validate, rejects_buffer_shorter_than_header)
@@ -111,6 +143,8 @@ TEST(frame_validate, rejects_mac_size_mismatch)
     frame_t frame(reinterpret_cast<uint8_t*>(storage.data()), storage.size());
     frame.set_version(k_frame_protocol_version);
     frame.set_frame_type(E_FRAME_TYPE_NETWORK);
+    frame.set_sec_ctx(1);
+    frame.set_int_algo(0);
     frame.set_mac_size(4);
 
     frame_const_t cframe(
@@ -127,7 +161,7 @@ TEST(frame_validate, accepts_minimal_valid_frame)
     frame_t frame(reinterpret_cast<uint8_t*>(storage.data()), storage.size());
     frame.set_version(k_frame_protocol_version);
     frame.set_frame_type(E_FRAME_TYPE_NETWORK);
-    frame.set_sec_ctx(1);
+    frame.set_sec_ctx(0);
     frame.set_ttl(8);
     frame.set_src(42);
     frame.set_dst(99);
@@ -137,7 +171,7 @@ TEST(frame_validate, accepts_minimal_valid_frame)
         storage.size()
     );
     EXPECT_TRUE(validate_frame(cframe));
-    EXPECT_TRUE(validate_frame_buffer(view_of(storage, frame_const_t::k_fixed_header_size)));
+    EXPECT_TRUE(validate_frame_buffer(view_of(storage, frame.get_header_size())));
 }
 
 TEST(frame_payload_view, returns_bytes_after_header)
@@ -147,6 +181,7 @@ TEST(frame_payload_view, returns_bytes_after_header)
     frame_t frame(raw, storage.size());
     frame.set_version(k_frame_protocol_version);
     frame.set_frame_type(E_FRAME_TYPE_NETWORK);
+    frame.set_payload_type(E_PAYLOAD_TYPE_BEACON);
 
     raw[frame.get_header_size()] = 0xAB;
     raw[frame.get_header_size() + 1] = 0xCD;

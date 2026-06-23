@@ -1,1 +1,11 @@
-node_id, public_key, key_type, notes 
+node_id,    public_key
+0:0:0:1,    MCowBQYDK2VuAyEASPGQaEAakWVIBEO2r74PxZCX440OgnX7OZlgZ3pllEc=
+0:0:0:2,    MCowBQYDK2VuAyEAprN1ybBF8n8pikkLCmG5UiJgqz/tb9xiXHW9I6cruUM=
+0:0:0:3,    MCowBQYDK2VuAyEAx79t69hyOu65raVofdOUqk9dlfZVrN66/83qU9HG+Xc=
+0:0:0:4,    MCowBQYDK2VuAyEA2EorymnmkOED5/wRwR8BuB9vSwYREBKqNJtkszPRmxM=
+0:0:0:5,    MCowBQYDK2VuAyEAUDuuuBibD9AQJ6FUqU9N8UrvHXaOifGFqcfjn3vabA4=
+0:0:0:6,    MCowBQYDK2VuAyEAAt6WFS3tWRcEFpj0eKqL+/Lzvf5RF4nlwS5MJJ6FQ0Y=
+0:0:0:7,    MCowBQYDK2VuAyEAO1wU2ibh3vykKcDIfAI3aDu4iAA6XnIAs3iawHxdvW4=
+0:0:0:8,    MCowBQYDK2VuAyEA+XCXCUXIppu2xj8Pe6EEdV2DXy28ybnnbko9KrddtnQ=
+0:0:0:9,    MCowBQYDK2VuAyEAgDVx25OpI4rFz+wlDx3NUveVAMTwEI67hv8I0DCpCwM=
+0:0:0:10,   MCowBQYDK2VuAyEAnuYZezo9vuJO59fou38KAW2pO4HQkhzvIx6xiKjQB1w=

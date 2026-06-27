@@ -13,10 +13,6 @@ namespace cum
 ************************************************/
 
 using key_t = cum::vector<u8, 256>;
-struct beacon
-{
-};
-
 enum dh_key_type_e
 {
     E_DHKT_NONE,
@@ -103,36 +99,6 @@ struct n2n_indication
 /            Codec Definitions
 /
 ************************************************/
-
-inline void encode_per(const beacon& pIe, cum::per_codec_ctx& pCtx)
-{
-    using namespace cum;
-}
-
-inline void decode_per(beacon& pIe, cum::per_codec_ctx& pCtx)
-{
-    using namespace cum;
-}
-
-inline void str(const char* pName, const beacon& pIe, std::string& pCtx, bool pIsLast)
-{
-    using namespace cum;
-    if (!pName)
-    {
-        pCtx = pCtx + "{";
-    }
-    else
-    {
-        pCtx = pCtx + "\"" + pName + "\":{";
-    }
-    size_t nOptional = 0;
-    size_t nMandatory = 0;
-    pCtx = pCtx + "}";
-    if (!pIsLast)
-    {
-        pCtx += ",";
-    }
-}
 
 inline void str(const char* pName, const dh_key_type_e& pIe, std::string& pCtx, bool pIsLast)
 {

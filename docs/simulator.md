@@ -250,3 +250,18 @@ Functions
 * `node_static_peer_transform` convert rows into node.static_peers entries, generate size
 
 ### Implementation
+
+Packet flow
+```
+to_id(a,b):
+    return (max(a,b),min(a,b))
+
+on_packet(in_socket, packet):
+    flow_id = to_id(packet.from, in_socket.addr)
+    is_ab = packet.from > socket.addr
+    flow = flows.find(flow_id)
+    profile = is_ab ? flow.ab_profile : flow.ba_profile
+    if (profile.should_drop(packet.size)):W
+        return
+    flow.to_output(packet);
+```

@@ -238,9 +238,6 @@ void node::send_beacon(beacon_ptr_t beacon)
 {
     bfc::sized_buffer pdu(1024*65);
 
-    cum::beacon msg;
-    msg.node_id = node_id;
-
     uint64_t ts = std::chrono::duration_cast<std::chrono::seconds>(std::chrono::system_clock::now().time_since_epoch()).count();
 
     frame_t frame(reinterpret_cast<uint8_t*>(pdu.data()), pdu.size());
@@ -283,6 +280,12 @@ void node::handle_pdu(const port_ptr_t& port, const sock_buff_t& pdu)
         return;
     }
 
+    if (frame.get_payload_type() == E_PAYLOAD_TYPE_BEACON)
+    {
+        handle_beacon(port, frame);
+        return;
+    }
+
     const auto payload = frame_payload_view(frame, pdu);
     if (payload.empty())
     {
@@ -298,13 +301,6 @@ void node::handle_pdu(const port_ptr_t& port, const sock_buff_t& pdu)
 
         switch (frame.get_payload_type())
         {
-        case E_PAYLOAD_TYPE_BEACON:
-        {
-            cum::beacon msg;
-            cum::decode_per(msg, ctx);
-            handle_btp_message(port, frame, msg);
-            break;
-        }
         case E_PAYLOAD_TYPE_MSG1:
         {
             cum::msg1 msg;
@@ -380,9 +376,9 @@ void node::on_port_in_queue_ready(port_ptr_t port)
     // handle_pdu(port, pdu);
 }
 
-void node::handle_btp_message(const port_ptr_t& /*port*/, const frame_const_t& /*frame*/, cum::beacon& /*msg*/)
+void node::handle_beacon(const port_ptr_t& /*port*/, const frame_const_t& /*frame*/)
 {
-    log(*g_logger, E_LOG_BIT_INFO, "node[%p]::handle_btp_message: Beacon!", this);
+    log(*g_logger, E_LOG_BIT_INFO, "node[%p]::handle_beacon", this);
 }
 
 void node::handle_btp_message(const port_ptr_t& /*port*/, const frame_const_t& /*frame*/, cum::msg1& /*msg*/)

@@ -1,8 +1,5 @@
 using key_t = dynamic<u8, 256>;
 
-sequence beacon
-{};
-
 enumeration dh_key_type_e
 {
     E_DHKT_NONE,

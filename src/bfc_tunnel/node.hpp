@@ -173,7 +173,7 @@ private:
 
     void on_port_in_queue_ready(port_ptr_t port);
     void handle_pdu(const port_ptr_t& port, const sock_buff_t& pdu);
-    void handle_btp_message(const port_ptr_t& port,const frame_const_t& frame, cum::beacon& msg);
+    void handle_beacon(const port_ptr_t& port, const frame_const_t& frame);
     void handle_btp_message(const port_ptr_t& port,const frame_const_t& frame, cum::msg1& msg);
     void handle_btp_message(const port_ptr_t& port,const frame_const_t& frame, cum::msg2& msg);
     void handle_btp_message(const port_ptr_t& port,const frame_const_t& frame, cum::exchange_network_keys& msg);

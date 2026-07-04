@@ -7,6 +7,17 @@
 #include <cstdint>
 #include <type_traits>
 
+namespace cum
+{
+struct msg1;
+struct msg2;
+struct link_info;
+struct link_report;
+struct route_announce;
+struct n2n_indication;
+struct exchange_network_keys;
+} // namespace cum
+
 namespace bfc_tunnel
 {
 
@@ -32,6 +43,16 @@ enum payload_type_e
     E_PAYLOAD_TYPE_TUNNEL_DATA            = 0x07,
     E_PAYLOAD_TYPE_EXCHANGE_NETWORK_KEYS  = 0x08,
 };
+
+template<typename T> struct msg_id;
+
+template<> struct msg_id<::cum::msg1>                  {static constexpr payload_type_e value = E_PAYLOAD_TYPE_MSG1;};
+template<> struct msg_id<::cum::msg2>                  {static constexpr payload_type_e value = E_PAYLOAD_TYPE_MSG2;};
+template<> struct msg_id<::cum::link_info>             {static constexpr payload_type_e value = E_PAYLOAD_TYPE_LINK_INFO;};
+template<> struct msg_id<::cum::link_report>           {static constexpr payload_type_e value = E_PAYLOAD_TYPE_LINK_REPORT;};
+template<> struct msg_id<::cum::route_announce>        {static constexpr payload_type_e value = E_PAYLOAD_TYPE_ROUTE_ANNOUNCE;};
+template<> struct msg_id<::cum::n2n_indication>        {static constexpr payload_type_e value = E_PAYLOAD_TYPE_N2N_INDICATION;};
+template<> struct msg_id<::cum::exchange_network_keys> {static constexpr payload_type_e value = E_PAYLOAD_TYPE_EXCHANGE_NETWORK_KEYS;};
 
 enum integrity_algorithm_e
 {
@@ -82,7 +103,7 @@ public:
     static constexpr size_t k_fixed_header_size       = k_fixed_prefix_size + k_fixed_post_mac_size;
     static constexpr size_t k_payload_type_size       = 1;
 
-    using byte_ptr = std::conditional_t<IsConst, const uint8_t*, uint8_t*>;
+    using byte_ptr = std::conditional_t<IsConst, const std::byte*, std::byte*>;
 
     basic_frame_t() = default;
     basic_frame_t(byte_ptr base, size_t size, size_t mac_sz = 0)
@@ -94,6 +115,11 @@ public:
     void rebase(byte_ptr base, size_t size)
     {
         base_ = base;
+        max_size_ = size;
+    }
+
+    void resize(size_t size)
+    {
         max_size_ = size;
     }
 
@@ -274,6 +300,11 @@ public:
         return max_size_ - get_header_size();
     }
 
+    size_t get_size() const
+    {
+        return get_header_size() + get_payload_size();
+    }
+
     bool is_header_valid() const
     {
         return base_ != nullptr && max_size_ >= get_header_size();
@@ -325,7 +356,7 @@ private:
 
     uint8_t get_bits(size_t index, uint8_t mask, uint8_t shift) const
     {
-        return (base_[index] & mask) >> shift;
+        return (static_cast<uint8_t>(base_[index]) & mask) >> shift;
     }
 
     template <bool B = IsConst, typename = std::enable_if_t<!B>>
@@ -383,7 +414,7 @@ inline bool validate_frame(const frame_const_t& frame)
         return false;
     }
 
-    if (frame.get_mac_size() != mac_size(frame.get_sec_ctx(), frame.get_int_algo()))
+    if (frame.get_mac_size() != integrity_mac_size(frame.get_int_algo()))
     {
         return false;
     }

@@ -1,9 +1,13 @@
 #include "bfc/sized_buffer.hpp"
-#include "bfc_tunnel/transport/transport_types.hpp"
+#include <bfc_tunnel/transport/transport_types.hpp>
 #include <bfc_tunnel/node.hpp>
 #include <bfc_tunnel/protocol/frame.hpp>
 #include <bfc_tunnel/utils/reactor_helper.hpp>
 #include <bfc_tunnel/utils/logger.hpp>
+#include <bfc_tunnel/utils/msg_utils.hpp>
+
+#include <chrono>
+#include <cstring>
 
 namespace bfc_tunnel
 {
@@ -29,7 +33,7 @@ void node::initialize()
                     return;
                 }
 
-                t->state = E_NODE_STATE_INITIALIZED;
+                t->is_initialized = true;
             }
         );
 }
@@ -40,7 +44,7 @@ void node::uninitialize()
         [w = weak_from_this()]()
         {
             auto t = w.lock();
-            if (!t || E_NODE_STATE_UNINITIALIZED == t->state)
+            if (!t || !t->is_initialized)
             {
                 return;
             }
@@ -58,11 +62,14 @@ void node::uninitialize()
             t->ports.clear();
             t->beacons.clear();
             t->static_peers.clear();
-            t->state = E_NODE_STATE_UNINITIALIZED;
+            t->peers.clear();
+            t->downstream_identities.clear();
+            t->selected_downstream_identity = nullptr;
+            t->is_initialized = false;
         });
 }
 
-void node::add_port(port_ptr_t port)
+void node::add_port(const port_ptr_t& port)
 {
     utils::dispatch_sync(*cv_reactor,
         [w = weak_from_this(), port]()
@@ -74,7 +81,7 @@ void node::add_port(port_ptr_t port)
                 return;
             }
 
-            if (E_NODE_STATE_INITIALIZED != t->state)
+            if (!t->is_initialized)
             {
                 log(*g_logger, E_LOG_BIT_ERROR, "node[%p]::add_port: Node is not initialized!", t.get());
                 return;
@@ -114,7 +121,7 @@ void node::add_port(port_ptr_t port)
         });
 }
 
-void node::rem_port(port_ptr_t port)
+void node::rem_port(const port_ptr_t& port)
 {
     utils::dispatch_sync(*cv_reactor,
         [w = weak_from_this(), port]()
@@ -218,7 +225,7 @@ void node::rem_beacon(const sockaddr_t& address)
     }
 }
 
-void node::on_beacon_timer_expired(beacon_ptr_t beacon)
+void node::on_beacon_timer_expired(const beacon_ptr_t& beacon)
 {
     beacon->beacon_timer_id = cv_reactor->get_timer().wait_ms(beacon->beacon_interval_ms,
         [w = weak_from_this(), beacon]()
@@ -234,24 +241,18 @@ void node::on_beacon_timer_expired(beacon_ptr_t beacon)
         });
 }
 
-void node::send_beacon(beacon_ptr_t beacon)
+void node::send_beacon(const beacon_ptr_t& beacon)
 {
     bfc::sized_buffer pdu(1024*65);
 
-    uint64_t ts = std::chrono::duration_cast<std::chrono::seconds>(std::chrono::system_clock::now().time_since_epoch()).count();
+    auto frame = prepare_frame(pdu, 0xFF, 0);
 
-    frame_t frame(reinterpret_cast<uint8_t*>(pdu.data()), pdu.size());
     frame.set_ttl(0);
-    frame.set_reserved(0);
-    frame.set_version(1);
     frame.set_frame_type(frame_type_e::E_FRAME_TYPE_PUBLIC);
-    frame.set_sec_ctx(0);
     frame.set_int_algo(E_EA_NONE);
     frame.set_conf_algo(E_CA_NONE);
-    frame.set_mac_size(0);
     frame.set_sn(0);
-    frame.set_ts(ts);
-    frame.set_src(node_id);
+    frame.set_src(selected_downstream_identity->node_id);
     frame.set_dst(0xFFFFFFFF);
     frame.set_payload_type(payload_type_e::E_PAYLOAD_TYPE_BEACON);
     
@@ -259,7 +260,7 @@ void node::send_beacon(beacon_ptr_t beacon)
     beacon->peer.port->transport->out.push(transport_out_t{transport_data_s{0, beacon->peer.address, std::move(pdu)}});
 }
 
-void node::handle_pdu(const port_ptr_t& port, const sock_buff_t& pdu)
+void node::handle_pdu(const port_ptr_t& port, const sockaddr_t& from, const sock_buff_t& pdu)
 {
     if (pdu.empty())
     {
@@ -267,12 +268,7 @@ void node::handle_pdu(const port_ptr_t& port, const sock_buff_t& pdu)
         return;
     }
 
-    auto pdu_raw = reinterpret_cast<const uint8_t*>(pdu.data());
-
-    frame_const_t probe(pdu_raw, pdu.size());
-    auto mac_size = integrity_mac_size(probe.get_int_algo());
-
-    frame_const_t frame(pdu_raw, pdu.size(), mac_size);
+    auto frame = to_frame(pdu.data(), pdu.size());
 
     if (!validate_frame(frame))
     {
@@ -282,7 +278,11 @@ void node::handle_pdu(const port_ptr_t& port, const sock_buff_t& pdu)
 
     if (frame.get_payload_type() == E_PAYLOAD_TYPE_BEACON)
     {
-        handle_beacon(port, frame);
+        handle_beacon(port, from, frame);
+        return;
+    }
+    else if (frame.get_payload_type() == E_PAYLOAD_TYPE_TUNNEL_DATA)
+    {
         return;
     }
 
@@ -365,20 +365,44 @@ void node::handle_pdu(const port_ptr_t& port, const sock_buff_t& pdu)
     }
 }
 
-void node::on_port_in_queue_ready(port_ptr_t port)
+void node::on_port_in_queue_ready(const port_ptr_t& port)
 {
-    auto pdu = port->transport->in.pop();
-    if (pdu.empty())
+    auto batch = port->transport->in.pop();
+    if (batch.empty())
     {
         return;
     }
 
-    // handle_pdu(port, pdu);
+    for (auto& item : batch)
+    {
+        handle_pdu(port, item.address, item.data);
+    }
 }
 
-void node::handle_beacon(const port_ptr_t& /*port*/, const frame_const_t& /*frame*/)
+void node:: handle_beacon(const port_ptr_t& port, const sockaddr_t& from, const frame_const_t& frame)
 {
-    log(*g_logger, E_LOG_BIT_INFO, "node[%p]::handle_beacon", this);
+    const node_id_t peer_node_id = frame.get_src();
+    auto peer_it = peers.find(peer_node_id);
+    if (peers.end() == peer_it)
+    {
+        auto public_keys_it = public_keys.find(peer_node_id);
+        if (public_keys.end() == public_keys_it)
+        {
+            return;
+        }
+
+        auto peer = std::make_shared<peer_s>();
+        peer->node_id = peer_node_id;
+        peer->public_keys = public_keys_it->second;
+        peer->preffered_peer_address = peer_address_s{port, from};
+        peer_update_link_activity(peer, port, from, frame.get_size());
+        peers.emplace(peer_node_id, peer);
+        peer_start_security_procedure(peer);
+    }
+
+    auto peer = peer_it->second;
+    peer_update_link_activity(peer, port, from, frame.get_size());
+    peer_start_security_procedure(peer);
 }
 
 void node::handle_btp_message(const port_ptr_t& /*port*/, const frame_const_t& /*frame*/, cum::msg1& /*msg*/)
@@ -414,6 +438,60 @@ void node::handle_btp_message(const port_ptr_t& /*port*/, const frame_const_t& /
 void node::handle_btp_message(const port_ptr_t& /*port*/, const frame_const_t& /*frame*/, cum::n2n_indication& /*msg*/)
 {
     log(*g_logger, E_LOG_BIT_INFO, "node[%p]::handle_btp_message: N2N indication!", this);
+}
+
+void node::peer_update_link_activity(const peer_ptr_t& peer, const port_ptr_t& port, const sockaddr_t& from, size_t size)
+{
+    auto link_it = std::find_if(peer->links.begin(), peer->links.end(), [&from](const std::pair<peer_address_s, peer_link_ctx_s>& link) { return is_equal(link.first.address, from); });
+    if (peer->links.end() == link_it)
+    {
+        peer->links.emplace_back(std::make_pair(peer->preffered_peer_address, peer_link_ctx_s{}));
+        auto& link = peer->links.back();
+        link.second.last_activity_time_us = std::chrono::steady_clock::now().time_since_epoch().count();
+        link.second.recv_pkt++;
+        link.second.recv_byt += size;
+    }
+    else
+    {
+        link_it->second.last_activity_time_us = std::chrono::steady_clock::now().time_since_epoch().count();
+        link_it->second.recv_pkt++;
+        link_it->second.recv_byt += size;
+    }
+}
+
+void node::peer_start_security_procedure(const peer_ptr_t& peer, bool force)
+{
+    if (peer->sec_ctxs.empty() && !force)
+    {
+        return;
+    }
+
+    if (peer->sec_proc_ctx)
+    {
+        log(*g_logger, E_LOG_BIT_ERROR, "node[%p]::peer_start_security_procedure: Security procedure already in progress for peer %u!", this, peer->node_id);
+        return;
+    }
+
+    
+
+    peer->sec_proc_ctx = sec_proc_ctx_s{dhke_kk(make_dh_backend(E_DHKT_X25519))};
+
+    auto pdu = bfc::sized_buffer(1024*65);
+    auto frame = prepare_frame(pdu, 0xFF, 0);
+    frame.set_ttl(0);
+    frame.set_frame_type(frame_type_e::E_FRAME_TYPE_PEER);
+    frame.set_int_algo(E_EA_NONE);
+    frame.set_conf_algo(E_CA_NONE);
+    frame.set_sn(peer->next_ctr++);
+    frame.set_src(selected_downstream_identity->node_id);
+    frame.set_dst(peer->node_id);
+    frame.set_payload_type(payload_type_e::E_PAYLOAD_TYPE_MSG1);
+
+    cum::msg1 msg1;
+    
+
+    pdu.resize(frame.get_header_size());
+    peer->preffered_peer_address.port->transport->out.push(transport_out_t{transport_data_s{0, peer->preffered_peer_address.address, std::move(pdu)}});
 }
 
 } // namespace bfc_tunnel

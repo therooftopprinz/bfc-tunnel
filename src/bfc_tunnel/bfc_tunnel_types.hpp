@@ -25,6 +25,8 @@ using io_reactor_t     = bfc::default_reactor<io_reactor_cb_t>;
 using io_reactor_ptr_t = std::shared_ptr<io_reactor_t>;
 using cv_reactor_ptr_t = std::shared_ptr<cv_reactor_t>;
 
+using timer_id_t = bfc::timer<>::timer_id_t;
+
 using node_id_t = uint32_t;
 
 using key_t = std::vector<uint8_t>;

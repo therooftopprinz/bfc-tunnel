@@ -19,6 +19,8 @@ struct sockaddr_none
 using sockaddr_t        = std::variant<sockaddr_none, sockaddr_in, sockaddr_in6>;
 using sock_buff_t       = bfc::sized_buffer;
 
+using sockaddrs_t = std::vector<sockaddr_t>;
+
 bool is_equal(const struct sockaddr *sa, const struct sockaddr *sb);
 bool is_equal(const sockaddr_t& a, const sockaddr_t& b);
 

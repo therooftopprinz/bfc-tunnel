@@ -22,6 +22,20 @@ void require_key_size(const key_t& key, const char* name)
 
 } // namespace
 
+key_t x25519_dh::public_from_private(const key_t& private_key)
+{
+    require_key_size(private_key, "private key");
+
+    const Botan::X25519_PrivateKey priv(private_key);
+    const auto                      pk = priv.public_value();
+    return key_t(pk.begin(), pk.end());
+}
+
+key_t x25519_dh::shared_key(const key_t& private_key, const key_t& peer_public_key)
+{
+    return x25519_dh().shared(private_key, peer_public_key);
+}
+
 key_t x25519_dh::shared(const key_t& private_key, const key_t& peer_public_key) const
 {
     require_key_size(private_key, "private key");

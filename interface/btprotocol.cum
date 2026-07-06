@@ -1,44 +1,48 @@
 using key_t = dynamic<u8, 256>;
 
-enumeration dh_key_type_e
+enumeration status_e
 {
-    E_DHKT_NONE,
-    E_DHKT_X25519,
-    E_DHKT_SECP256R1,
-    E_DHKT_CURVE448
+    OK,
+    UNSUPPORTED,
+    VERIFICATION_FAILED
 };
 
 sequence msg1
 {
-    u8 sec_ctx;
-    u8 dh_key_type;
-    key_t ephemeral;
-    key_t signature;
+    u8     id;
+    u8     sec_ctx;
+    u8     integrity_algorithm;
+    u8     confidentiality_algorithm;
+    u8     dh_key_type;
+    key_t  ephemeral;
+    key_t  signature;
 };
 
 sequence msg2
 {
-    key_t ephemeral;
-    key_t signature;
+    u8        id;
+    status_e  status;
+    key_t     ephemeral;
+    key_t     signature;
 };
 
 sequence network_key
 {
-    u8 sec_ctx;
-    key_t key;
-    u64 creation_time_us;
-    u16 duration_s;
-    u8 confidentiality_algorithm;
-    u8 integrity_algorithm;
+    u8     sec_ctx;
+    key_t  key;
+    u64    creation_time_us;
+    u16    duration_s;
+    u8     integrity_algorithm;
+    u8     confidentiality_algorithm;
 };
 
 using network_keys = dynamic<network_key, 256>;
 
 sequence exchange_network_keys
 {
-    u8 record_index;
-    u8 record_total;
-    network_keys keys;
+    u8            record_index;
+    u8            record_total;
+    network_keys  keys;
 };
 
 sequence link_info

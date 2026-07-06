@@ -43,10 +43,9 @@ Multicast and unicast transport use different media but are equivalent for **BFC
 | 1    | `u1`  | `reserved`    | Reserved                             |       |
 | -    | `u5`  | `version`     | Protocol Version                     |       |
 | -    | `u2`  | `frame_type`  | Frame Type                           |       |
-| 1    | `u8`  | `sec_ctx`     | Security Key Context                 |       |
-| 1    | `u4`  | `int_algo`    | Integrity Protection Algorithm       |       |
-| -    | `u4`  | `conf_algo`   | Confidentiality Protection Algorithm |       |
-| s(x) | `x`   | `mac`         | Message Authentication Code          | [1]   |
+| 1    | `u4`  | `sec_ctx`     | Security Context                     |       |
+| -    | `u4`  | `mac_size`    | MAC size in 32-bit unit              |       |
+| x    | `ux`  | `mac`         | Message Authentication Code          | [1]   |
 | 4    | `u32` | `sn`          | Sequence Number                      |       |
 | 4    | `u32` | `ts`          | Epoch Second                         |       |
 | 4    | `u32` | `src`         | Source NodeId                        |       |
@@ -54,8 +53,8 @@ Multicast and unicast transport use different media but are equivalent for **BFC
 | 1    | `u8`  | `type`        | Payload Type                         |       |
 | N    | `u8[]`| `payload`     | Payload                              |       |
 
-*Notes:*<br/>
-*1. `x = 0` when `sec_ctx = 0`; otherwise `x = mac_size(int_algo)`*<br/>
+***notes***<br/>
+***1. x = mac_size\*4***
 
 ---
 
@@ -77,10 +76,9 @@ Fields are encoded in network byte order (big-endian). Bit-fields that share a b
 - `reserved` is reserved for future use and MUST be set to zero on transmission.
 - `version` MUST match the negotiated protocol version.
 - `frame_type` selects the frame interpretation (see Frame Types).
-- `sec_ctx` selects the security key context and keying material used to validate and decrypt the frame. A value of `0` indicates plaintext (no MAC, confidentiality, or integrity protection).
-- `int_algo` selects the integrity protection algorithm used to compute and verify `mac`.
-- `conf_algo` selects the confidentiality protection algorithm applied to `payload` when `sec_ctx` is non-zero.
-- `mac` length is zero when `sec_ctx` is `0`; otherwise it is `mac_size(int_algo)` bytes.
+- `sec_ctx` selects the security context.
+- `mac_size` is the MAC length in 32-bit units; MAC occupies `mac_size * 4` bytes.
+- `mac` is the message authentication code for the frame.
 - `sn` and `ts` provide replay-window and freshness inputs.
 - `src` and `dst` are overlay Node IDs used for routing and policy checks.
 - `type` selects the payload interpretation (see Message Types).
@@ -137,8 +135,8 @@ B -->> C : (NETWORK, A to C) TUNNEL_DATA
 
 Peer security establishes the keys used for confidentiality and integrity protection, and its algorithms used as well.
 It follows key Noise_KK_25519 for the key exchange.
-MSG1 will be sent in plaintext (sec_ctx = 0), initiator will assign the sec_ctx (example sec_ctx=1).
-MSG2 will be sent in accordance to MSG1 sec_ctx config. sec_ctx for peer is index by (n1, n2, sec_ctx).
+MSG1 will be sent in plaintext (`sec_ctx` is `NONE`).
+MSG2 will be sent in accordance with MSG1. Peer security context is indexed by (n1, n2).
 n1 and n2 are node ids for initiator and responser (either of which), where n2 > n1.
 
 In local broadcast transport it is possible to have concurrent MSG1 from n1 and n2,
@@ -222,12 +220,16 @@ Sent on all transport types to identify active neighboring nodes.
 
 **Msg1**
 
-| Size | Type  | Field         |
-|------|-------|---------------|
-| 1    | `u8`  | ephemeral_len |
-| var  | `u8`  | ephemeral     |
-| 1    | `u8`  | signature_len |
-| var  | `u8`  | signature     |
+| Size | Type  | Field                     |
+|------|-------|---------------------------|
+| 1    | `u8`  | sec_ctx                   |
+| 1    | `u8`  | integrity_algorithm       |
+| 1    | `u8`  | confidentiality_algorithm |
+| 1    | `u8`  | dh_key_type               |
+| 1    | `u8`  | ephemeral_len             |
+| var  | `u8`  | ephemeral                 |
+| 1    | `u8`  | signature_len             |
+| var  | `u8`  | signature                 |
 
 **Msg2**
 
@@ -238,9 +240,27 @@ Sent on all transport types to identify active neighboring nodes.
 | 1    | `u8` | signature_len |
 | var  | `u8` | signature     |
 
----
+**Network Key**
 
-**Link Info**
+| Size | Type  | Field                     |
+|------|-------|---------------------------|
+| 1    | `u8`  | sec_ctx                   |
+| 1    | `u8`  | key_len                   |
+| var  | `u8`  | key                       |
+| 8    | `u64` | creation_time_us          |
+| 2    | `u16` | duration_s                |
+| 1    | `u8`  | integrity_algorithm       |
+| 1    | `u8`  | confidentiality_algorithm |
+
+**Exchange Network Keys**
+
+| Size | Type          | Field        |
+|------|---------------|--------------|
+| 1    | `u8`          | record_index |
+| 1    | `u8`          | record_total |
+| var  | `network_key` | keys         |
+
+---
 
 | Size | Type  | Field          |
 |------|-------|----------------|

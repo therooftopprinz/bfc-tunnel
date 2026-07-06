@@ -12,6 +12,10 @@ public:
     static constexpr size_t k_key_bytes = 32;
 
     size_t key_bytes() const override { return k_key_bytes; }
+
+    static key_t public_from_private(const key_t& private_key);
+    static key_t shared_key(const key_t& private_key, const key_t& peer_public_key);
+
     key_t  shared(const key_t& private_key, const key_t& peer_public_key) const override;
     void   generate_ephemeral(key_t& private_key, key_t& public_key) const override;
 };

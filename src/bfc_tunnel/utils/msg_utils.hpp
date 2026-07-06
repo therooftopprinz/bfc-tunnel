@@ -8,7 +8,7 @@
 namespace bfc_tunnel
 {
 
-frame_t prepare_frame(bfc::sized_buffer& buffer, uint8_t ctx_id, size_t mac_size);
+frame_t prepare_frame(bfc::sized_buffer& buffer);
 frame_const_t to_frame(const std::byte* data, size_t size);
 
 template<typename T>

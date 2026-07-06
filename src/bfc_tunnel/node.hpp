@@ -19,6 +19,7 @@
 #include <bfc_tunnel/security/dh.hpp>
 #include <bfc_tunnel/transport/transport_types.hpp>
 #include <bfc_tunnel/security/dh.hpp>
+#include <set>
 
 namespace bfc_tunnel
 {
@@ -29,12 +30,13 @@ namespace bfc_tunnel
 /
 ************************************************/
 struct port_s;
-struct security_context_s;
+struct security_ctx_s;
 struct peer_s;
 struct peer_link_ctx_s;
 
 using port_ptr_t          = std::shared_ptr<port_s>;
 using peer_ptr_t          = std::shared_ptr<peer_s>;
+using peer_weak_ptr_t    = std::weak_ptr<peer_s>;
 using peer_link_ctx_ptr_t = std::shared_ptr<peer_link_ctx_s>;
 
 using ports_t             = std::vector<port_ptr_t>;
@@ -66,18 +68,18 @@ using port_by_address_map = std::unordered_map<std::string, port_ptr_t>;
 /
 ************************************************/
 
-struct security_context_s
+struct security_ctx_s
 {
-    key_t      base_key_dh_eb;
-    key_t      base_key_dh_ab;
-    key_t      base_key_dh_ef;
-    key_t      base_key_dh_af;
-    std::vector<std::pair<uint8_t, key_t>> int_algo_keys;
-    std::vector<std::pair<uint8_t, key_t>> conf_algo_keys;
+    uint8_t    id;
+    key_t      integrity_key;
+    key_t      confidentiality_key;
+    uint8_t    integrity_algorithm;
+    uint8_t    confidentiality_algorithm;
     timer_id_t timer_id;
+    bool       is_expiring = false;
 };
 
-using sec_ctx_map = std::unordered_map<uint8_t, security_context_s>;
+using security_ctxs_t = std::deque<security_ctx_s>;
 
 /***********************************************
 /
@@ -87,33 +89,45 @@ using sec_ctx_map = std::unordered_map<uint8_t, security_context_s>;
 
 struct peer_address_s
 {
-    port_ptr_t port;
-    sockaddr_t address;
+    port_ptr_t        port;
+    sockaddr_t        address;
 };
 
 struct peer_public_key_s
 {
-    uint8_t    key_type;
-    key_t      public_key;
+    dh_key_type_e     key_type;
+    key_t             public_key;
 };
 
-using peer_public_keys_t = std::vector<peer_public_key_s>;
-using public_keys_t      = std::unordered_map<node_id_t, peer_public_keys_t>;
+using public_keys_t = std::unordered_map<node_id_t, peer_public_key_s>;
+
+enum peer_transaction_status_e
+{
+    E_PEER_TRANSACTION_STATUS_OK,
+    E_PEER_TRANSACTION_STATUS_MAX_RETRIES_REACHED,
+    E_PEER_TRANSACTION_STATUS_NOT_IN_PROGRESS,
+    E_PEER_TRANSACTION_STATUS_VERIFICATION_FAILED,
+    E_PEER_TRANSACTION_STATUS_UNSUPPORTED,
+    E_PEER_TRANSACTION_STATUS_NO_SUPPORTED_ALGORITHM_PAIR,
+    E_PEER_TRANSACTION_STATUS_PEER_TEARDOWN
+};
+
+const char* to_string(peer_transaction_status_e status);
 
 struct peer_transaction_s
 {
-    peer_address_s    address;
     uint8_t           id;
-    bfc::sized_buffer data;
-    completion_cb_t   callback;
+    transaction_cb_t  do_cb;
+    completion_cb_t   done_cb;
+    expiration_cb_t   expiration_cb;
 };
 
-using peer_transaction_t = std::optional<peer_transaction_s>;
+using peer_transaction_t  = std::optional<peer_transaction_s>;
 using peer_transactions_t = std::deque<peer_transaction_s>;
 
 struct peer_link_ctx_s
 {
-    uint64_t last_activity_time_us = 0;
+    uint64_t last_activity_time_s = 0;
     uint64_t sent_pkt = 0;
     uint64_t recv_pkt = 0;
     uint64_t sent_byt = 0;
@@ -122,27 +136,64 @@ struct peer_link_ctx_s
 
 using peer_links_t = std::vector<std::pair<peer_address_s, peer_link_ctx_s>>;
 
-struct sec_proc_ctx_s
+using algo_pair_t = std::pair<uint8_t, uint8_t>;
+using algorithm_pairs_t = std::set<algo_pair_t>;
+
+struct security_procedure_ctx_s
 {
-    dhke_kk dhke;
+    enum sec_proc_state_e
+    {
+        E_SEC_PROC_STATE_SENDER_QUEUED,
+        E_SEC_PROC_STATE_SENDER_ONGOING,
+        E_SEC_PROC_STATE_SENDER_EXPIRED,
+        E_SEC_PROC_STATE_SENDER_UNSUPPORTED,
+        E_SEC_PROC_STATE_FAILED
+    };
+
+    uint8_t             id;
+    sec_proc_state_e    state = E_SEC_PROC_STATE_SENDER_ONGOING;
+    unsigned            retry_count = 0;
+    bfc::sized_buffer   pdu;
+    frame_t             frame;
+    cum::msg1           msg1;
+    algo_pair_t         algo_pair_used;
+
+    dhke_kk             dhke;
 };
 
-using sec_proc_ctx_t = std::optional<sec_proc_ctx_s>;
+using sec_proc_ctx_t = std::optional<security_procedure_ctx_s>;
 
 struct peer_s
 {
-    static constexpr uint64_t k_peer_static  = 1 >> 0;
+    static constexpr uint64_t k_peer_static       = 1 << 0;
+
     uint64_t                  flags = 0;
     node_id_t                 node_id = 0;
-    peer_public_keys_t        public_keys;
-    sec_ctx_map               sec_ctxs = {};
-    peer_address_s            preffered_peer_address = {};
-    peer_links_t              links;
+    peer_public_key_s         public_key;
+
+    // security
+    security_ctxs_t           security_contexts;
+    uint8_t                   sec_ctx_ctr = 0;
+    uint32_t                  tx_sn = 0;
+
+    // transport
+    peer_address_s            preferred_peer_address = {};
+    peer_links_t              multicast_links;
+    peer_links_t              unicast_links;
+    uint64_t                  last_activity_time_s = 0;
+
+    // transactions
+    uint8_t                   trid_ctr = 0;
     peer_transaction_t        current_transaction;
     peer_transactions_t       pending_transactions;
-    uint32_t                  next_ctr = 0;
     timer_id_t                transaction_timer_id;
+
+    // procedures
     sec_proc_ctx_t            sec_proc_ctx;
+
+    // config
+    algorithm_pairs_t         test_algorithm_pairs;
+    algorithm_pairs_t         supported_algorithm_pairs;
 };
 
 using peer_by_node_id_map = std::unordered_map<node_id_t, peer_ptr_t>;
@@ -181,6 +232,13 @@ using downstream_identities_t = std::vector<downstream_identity_ptr_t>;
 /
 ************************************************/
 
+struct node_config_s
+{
+    uint64_t beacon_interval_ms             = 500;
+    uint64_t check_peer_activity_interval_s = 15;
+    uint64_t peer_timeout_s                 = 15;
+};
+
 class node : public std::enable_shared_from_this<node>
 {
 public:
@@ -197,17 +255,22 @@ public:
     void add_downstream_identity     (const downstream_identity_ptr_t& identity);
     void rem_downstream_identity     (const downstream_identity_ptr_t& identity);
 
+    void set_supported_integrity_algorithms(const u8_vec_t& algorithms);
+    void set_supported_confidentiality_algorithms(const u8_vec_t& algorithms);
+
+    void set_node_config(const node_config_s& config);
+
 private:
     void add_beacon(beacon_ptr_t beacon);
     void rem_beacon(const port_ptr_t&);
     void rem_beacon(const sockaddr_t&);
 
-    void on_beacon_timer_expired                (const beacon_ptr_t& beacon);
-    void send_beacon                            (const beacon_ptr_t& beacon);
+    void on_beacon_timer_expired  (const beacon_ptr_t& beacon);
+    void send_beacon              (const beacon_ptr_t& beacon);
 
-    void on_port_in_queue_ready                 (const port_ptr_t& port);
-    void handle_pdu                             (const port_ptr_t& port, const sockaddr_t& from, const sock_buff_t& pdu);
-    void handle_beacon                          (const port_ptr_t& port, const sockaddr_t& from, const frame_const_t& frame);
+    void on_port_in_queue_ready   (const port_ptr_t& port);
+    void handle_pdu               (const port_ptr_t& port, const sockaddr_t& from, const sock_buff_t& pdu);
+    void handle_beacon            (const port_ptr_t& port, const sockaddr_t& from, const frame_const_t& frame);
 
     void handle_btp_message(const port_ptr_t& port,const frame_const_t& frame, cum::msg1& msg);
     void handle_btp_message(const port_ptr_t& port,const frame_const_t& frame, cum::msg2& msg);
@@ -217,10 +280,22 @@ private:
     void handle_btp_message(const port_ptr_t& port,const frame_const_t& frame, cum::route_announce& msg);
     void handle_btp_message(const port_ptr_t& port,const frame_const_t& frame, cum::n2n_indication& msg);
 
-    void peer_update_link_activity(const peer_ptr_t& peer, const port_ptr_t& port, const sockaddr_t& from, size_t size);
-    void peer_start_security_procedure(const peer_ptr_t& peer, bool force = false);
+    peer_ptr_t          peer_create(const node_id_t& node_id, const peer_public_key_s& public_key);
+    void                peer_update_link_activity(const peer_ptr_t& peer, const port_ptr_t& port, const sockaddr_t& from, size_t size);
+    void                peer_start_security_procedure(const peer_ptr_t& peer, bool force = false);
+    uint8_t             peer_get_next_sec_ctx_id(const peer_ptr_t& peer);
+    security_ctx_s&     peer_get_or_create_sec_ctx(const peer_ptr_t& peer, uint8_t id);
+    void                peer_process_pending_transactions(const peer_ptr_t& peer);
+    void                peer_retry_transaction(const peer_ptr_t& peer);
+    void                peer_complete_transaction(const peer_ptr_t& peer, uint8_t id, int code);
+    void                peer_schedule_check_activity();
+    void                peer_cleanup(const peer_ptr_t& peer);
+    
+    uint64_t            now_s();
+    void                reconfigure();
 
-    cv_reactor_ptr_t cv_reactor;
+    cv_reactor_ptr_t            cv_reactor;
+    node_config_s               config;
 
     bool                        is_initialized = false;
     downstream_identity_ptr_t   selected_downstream_identity;    
@@ -230,6 +305,12 @@ private:
     sockaddrs_t                 static_peers;
     downstream_identities_t     downstream_identities;
     public_keys_t               public_keys;
+    security_ctxs_t             network_security_contexts;
+    u8_vec_t                    supported_integrity_algorithms;
+    u8_vec_t                    supported_confidentiality_algorithms;
+
+    // maintenance tasks
+    timer_id_t                  check_peer_activity_timer_id;
 };
 
 } // namespace bfc_tunnel

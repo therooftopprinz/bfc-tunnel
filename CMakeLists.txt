@@ -130,6 +130,7 @@ set(BFC_TUNNEL_COMPILE_WARNINGS
 
 add_library(bfc_tunnel_security STATIC
   src/bfc_tunnel/security/dh.cpp
+  src/bfc_tunnel/security/key_utils.cpp
   src/bfc_tunnel/security/x25519_dh.cpp
 )
 target_include_directories(bfc_tunnel_security PUBLIC
@@ -142,6 +143,7 @@ add_library(bfc_tunnel STATIC
   src/bfc_tunnel/transport/transport_types.cpp
   src/bfc_tunnel/transport/udp_unicast_transport.cpp
   src/bfc_tunnel/utils/logger.cpp
+  src/bfc_tunnel/utils/msg_utils.cpp
   src/bfc_tunnel/node.cpp
   src/bfc_tunnel/route_manager.cpp
 )

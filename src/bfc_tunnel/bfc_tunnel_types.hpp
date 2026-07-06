@@ -15,9 +15,11 @@ namespace bfc_tunnel
 constexpr uint64_t k_completion_code_success = 0;
 constexpr uint64_t k_completion_code_failure = 1;
 
-using cv_reactor_cb_t = std::function<void()>;
-using io_reactor_cb_t = std::function<void()>;
-using completion_cb_t = std::function<void(int code)>;
+using cv_reactor_cb_t  = std::function<void()>;
+using io_reactor_cb_t  = std::function<void()>;
+using transaction_cb_t = std::function<void(uint8_t id)>;
+using completion_cb_t  = std::function<void(uint8_t id, int code)>;
+using expiration_cb_t  = std::function<void(uint8_t id)>;
 
 using reactor_cb_t     = cv_reactor_cb_t;
 using cv_reactor_t     = bfc::cv_reactor<cv_reactor_cb_t>;
@@ -30,6 +32,10 @@ using timer_id_t = bfc::timer<>::timer_id_t;
 using node_id_t = uint32_t;
 
 using key_t = std::vector<uint8_t>;
+using key_vec_t = std::vector<key_t>;
+
+using u8_vec_t  = std::vector<uint8_t>;
+using u32_vec_t = std::vector<uint32_t>;
 
 } // namespace bfc_tunnel
 

@@ -13,17 +13,19 @@ namespace cum
 ************************************************/
 
 using key_t = cum::vector<u8, 256>;
-enum dh_key_type_e
+enum status_e
 {
-    E_DHKT_NONE,
-    E_DHKT_X25519,
-    E_DHKT_SECP256R1,
-    E_DHKT_CURVE448
+    OK,
+    UNSUPPORTED,
+    VERIFICATION_FAILED
 };
 
 struct msg1
 {
+    u8 id;
     u8 sec_ctx;
+    u8 integrity_algorithm;
+    u8 confidentiality_algorithm;
     u8 dh_key_type;
     key_t ephemeral;
     key_t signature;
@@ -31,6 +33,8 @@ struct msg1
 
 struct msg2
 {
+    u8 id;
+    status_e status;
     key_t ephemeral;
     key_t signature;
 };
@@ -41,8 +45,8 @@ struct network_key
     key_t key;
     u64 creation_time_us;
     u16 duration_s;
-    u8 confidentiality_algorithm;
     u8 integrity_algorithm;
+    u8 confidentiality_algorithm;
 };
 
 using network_keys = cum::vector<network_key, 256>;
@@ -100,17 +104,16 @@ struct n2n_indication
 /
 ************************************************/
 
-inline void str(const char* pName, const dh_key_type_e& pIe, std::string& pCtx, bool pIsLast)
+inline void str(const char* pName, const status_e& pIe, std::string& pCtx, bool pIsLast)
 {
     using namespace cum;
     if (pName)
     {
         pCtx = pCtx + "\"" + pName + "\":";
     }
-    if (dh_key_type_e::E_DHKT_NONE == pIe) pCtx += "\"E_DHKT_NONE\"";
-    if (dh_key_type_e::E_DHKT_X25519 == pIe) pCtx += "\"E_DHKT_X25519\"";
-    if (dh_key_type_e::E_DHKT_SECP256R1 == pIe) pCtx += "\"E_DHKT_SECP256R1\"";
-    if (dh_key_type_e::E_DHKT_CURVE448 == pIe) pCtx += "\"E_DHKT_CURVE448\"";
+    if (status_e::OK == pIe) pCtx += "\"OK\"";
+    if (status_e::UNSUPPORTED == pIe) pCtx += "\"UNSUPPORTED\"";
+    if (status_e::VERIFICATION_FAILED == pIe) pCtx += "\"VERIFICATION_FAILED\"";
     pCtx = pCtx + "}";
     if (!pIsLast)
     {
@@ -121,7 +124,10 @@ inline void str(const char* pName, const dh_key_type_e& pIe, std::string& pCtx, 
 inline void encode_per(const msg1& pIe, cum::per_codec_ctx& pCtx)
 {
     using namespace cum;
+    encode_per(pIe.id, pCtx);
     encode_per(pIe.sec_ctx, pCtx);
+    encode_per(pIe.integrity_algorithm, pCtx);
+    encode_per(pIe.confidentiality_algorithm, pCtx);
     encode_per(pIe.dh_key_type, pCtx);
     encode_per(pIe.ephemeral, pCtx);
     encode_per(pIe.signature, pCtx);
@@ -130,7 +136,10 @@ inline void encode_per(const msg1& pIe, cum::per_codec_ctx& pCtx)
 inline void decode_per(msg1& pIe, cum::per_codec_ctx& pCtx)
 {
     using namespace cum;
+    decode_per(pIe.id, pCtx);
     decode_per(pIe.sec_ctx, pCtx);
+    decode_per(pIe.integrity_algorithm, pCtx);
+    decode_per(pIe.confidentiality_algorithm, pCtx);
     decode_per(pIe.dh_key_type, pCtx);
     decode_per(pIe.ephemeral, pCtx);
     decode_per(pIe.signature, pCtx);
@@ -148,8 +157,11 @@ inline void str(const char* pName, const msg1& pIe, std::string& pCtx, bool pIsL
         pCtx = pCtx + "\"" + pName + "\":{";
     }
     size_t nOptional = 0;
-    size_t nMandatory = 4;
+    size_t nMandatory = 7;
+    str("id", pIe.id, pCtx, !(--nMandatory+nOptional));
     str("sec_ctx", pIe.sec_ctx, pCtx, !(--nMandatory+nOptional));
+    str("integrity_algorithm", pIe.integrity_algorithm, pCtx, !(--nMandatory+nOptional));
+    str("confidentiality_algorithm", pIe.confidentiality_algorithm, pCtx, !(--nMandatory+nOptional));
     str("dh_key_type", pIe.dh_key_type, pCtx, !(--nMandatory+nOptional));
     str("ephemeral", pIe.ephemeral, pCtx, !(--nMandatory+nOptional));
     str("signature", pIe.signature, pCtx, !(--nMandatory+nOptional));
@@ -163,6 +175,8 @@ inline void str(const char* pName, const msg1& pIe, std::string& pCtx, bool pIsL
 inline void encode_per(const msg2& pIe, cum::per_codec_ctx& pCtx)
 {
     using namespace cum;
+    encode_per(pIe.id, pCtx);
+    encode_per(pIe.status, pCtx);
     encode_per(pIe.ephemeral, pCtx);
     encode_per(pIe.signature, pCtx);
 }
@@ -170,6 +184,8 @@ inline void encode_per(const msg2& pIe, cum::per_codec_ctx& pCtx)
 inline void decode_per(msg2& pIe, cum::per_codec_ctx& pCtx)
 {
     using namespace cum;
+    decode_per(pIe.id, pCtx);
+    decode_per(pIe.status, pCtx);
     decode_per(pIe.ephemeral, pCtx);
     decode_per(pIe.signature, pCtx);
 }
@@ -186,7 +202,9 @@ inline void str(const char* pName, const msg2& pIe, std::string& pCtx, bool pIsL
         pCtx = pCtx + "\"" + pName + "\":{";
     }
     size_t nOptional = 0;
-    size_t nMandatory = 2;
+    size_t nMandatory = 4;
+    str("id", pIe.id, pCtx, !(--nMandatory+nOptional));
+    str("status", pIe.status, pCtx, !(--nMandatory+nOptional));
     str("ephemeral", pIe.ephemeral, pCtx, !(--nMandatory+nOptional));
     str("signature", pIe.signature, pCtx, !(--nMandatory+nOptional));
     pCtx = pCtx + "}";
@@ -203,8 +221,8 @@ inline void encode_per(const network_key& pIe, cum::per_codec_ctx& pCtx)
     encode_per(pIe.key, pCtx);
     encode_per(pIe.creation_time_us, pCtx);
     encode_per(pIe.duration_s, pCtx);
-    encode_per(pIe.confidentiality_algorithm, pCtx);
     encode_per(pIe.integrity_algorithm, pCtx);
+    encode_per(pIe.confidentiality_algorithm, pCtx);
 }
 
 inline void decode_per(network_key& pIe, cum::per_codec_ctx& pCtx)
@@ -214,8 +232,8 @@ inline void decode_per(network_key& pIe, cum::per_codec_ctx& pCtx)
     decode_per(pIe.key, pCtx);
     decode_per(pIe.creation_time_us, pCtx);
     decode_per(pIe.duration_s, pCtx);
-    decode_per(pIe.confidentiality_algorithm, pCtx);
     decode_per(pIe.integrity_algorithm, pCtx);
+    decode_per(pIe.confidentiality_algorithm, pCtx);
 }
 
 inline void str(const char* pName, const network_key& pIe, std::string& pCtx, bool pIsLast)
@@ -235,8 +253,8 @@ inline void str(const char* pName, const network_key& pIe, std::string& pCtx, bo
     str("key", pIe.key, pCtx, !(--nMandatory+nOptional));
     str("creation_time_us", pIe.creation_time_us, pCtx, !(--nMandatory+nOptional));
     str("duration_s", pIe.duration_s, pCtx, !(--nMandatory+nOptional));
-    str("confidentiality_algorithm", pIe.confidentiality_algorithm, pCtx, !(--nMandatory+nOptional));
     str("integrity_algorithm", pIe.integrity_algorithm, pCtx, !(--nMandatory+nOptional));
+    str("confidentiality_algorithm", pIe.confidentiality_algorithm, pCtx, !(--nMandatory+nOptional));
     pCtx = pCtx + "}";
     if (!pIsLast)
     {

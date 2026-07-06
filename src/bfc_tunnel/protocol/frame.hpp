@@ -60,6 +60,7 @@ enum integrity_algorithm_e
     E_EA_HMAC_SHA2_512    = 1,
     E_EA_HMAC_SHA2_256    = 2,
     E_EA_HMAC_BLAKE3      = 3,
+    E_EA_MAX              = 4
 };
 
 enum confidentiality_algorithm_e
@@ -68,6 +69,7 @@ enum confidentiality_algorithm_e
     E_CA_AES128     = 1,
     E_CA_AES256     = 2,
     E_CA_CHACHA20   = 3,
+    E_CA_MAX        = 4
 };
 
 enum dh_key_type_e
@@ -76,7 +78,10 @@ enum dh_key_type_e
     E_DHKT_X25519     = 1,
     E_DHKT_SECP256R1  = 2,
     E_DHKT_CURVE448   = 3,
+    E_DHKT_MAX        = 4
 };
+
+constexpr uint8_t k_sec_ctx_none = 0;
 
 inline size_t integrity_mac_size(uint8_t int_algo)
 {
@@ -94,11 +99,43 @@ inline size_t integrity_mac_size(uint8_t int_algo)
     return 0;
 }
 
+inline size_t integrity_key_size(uint8_t int_algo)
+{
+    switch (int_algo)
+    {
+        case E_EA_NONE:
+            return 0;
+        case E_EA_HMAC_SHA2_512:
+            return 64;
+        case E_EA_HMAC_SHA2_256:
+            return 32;
+        case E_EA_HMAC_BLAKE3:
+            return 32;
+    }
+    return 0;
+}
+
+inline size_t confidentiality_key_size(uint8_t conf_algo)
+{
+    switch (conf_algo)
+    {
+        case E_CA_NONE:
+            return 0;
+        case E_CA_AES128:
+            return 16;
+        case E_CA_AES256:
+            return 32;
+        case E_CA_CHACHA20:
+            return 32;
+    }
+    return 0;
+}
+
 template <bool IsConst>
 class basic_frame_t
 {
 public:
-    static constexpr size_t k_fixed_prefix_size     = 4;
+    static constexpr size_t k_fixed_prefix_size     = 3;
     static constexpr size_t k_fixed_post_mac_size     = 16;
     static constexpr size_t k_fixed_header_size       = k_fixed_prefix_size + k_fixed_post_mac_size;
     static constexpr size_t k_payload_type_size       = 1;
@@ -106,11 +143,16 @@ public:
     using byte_ptr = std::conditional_t<IsConst, const std::byte*, std::byte*>;
 
     basic_frame_t() = default;
-    basic_frame_t(byte_ptr base, size_t size, size_t mac_sz = 0)
+    basic_frame_t(byte_ptr base, size_t size)
         : base_(base)
         , max_size_(size)
-        , mac_size_(mac_sz)
-    {}
+    {
+        if (base != nullptr && size >= k_fixed_prefix_size)
+        {
+            mac_size_ = static_cast<size_t>(
+                (static_cast<uint8_t>(base[k_byte_sec_mac]) & k_mask_mac_size) >> k_shift_mac_size) * 4;
+        }
+    }
 
     void rebase(byte_ptr base, size_t size)
     {
@@ -136,12 +178,12 @@ public:
     template <bool B = IsConst, typename = std::enable_if_t<!B>>
     void set_ttl(uint8_t ttl)
     {
-        base_[k_byte_ttl] = ttl;
+        base_[k_byte_ttl] = static_cast<std::byte>(ttl);
     }
 
     uint8_t get_ttl() const
     {
-        return base_[k_byte_ttl];
+        return static_cast<uint8_t>(base_[k_byte_ttl]);
     }
 
     template <bool B = IsConst, typename = std::enable_if_t<!B>>
@@ -180,34 +222,24 @@ public:
     template <bool B = IsConst, typename = std::enable_if_t<!B>>
     void set_sec_ctx(uint8_t sec_ctx)
     {
-        base_[k_byte_sec_ctx] = sec_ctx;
+        set_bits(k_byte_sec_mac, k_mask_sec_ctx, k_shift_sec_ctx, sec_ctx);
     }
 
     uint8_t get_sec_ctx() const
     {
-        return base_[k_byte_sec_ctx];
+        return get_bits(k_byte_sec_mac, k_mask_sec_ctx, k_shift_sec_ctx);
     }
 
     template <bool B = IsConst, typename = std::enable_if_t<!B>>
-    void set_int_algo(uint8_t v)
+    void set_mac_size_units(uint8_t units)
     {
-        set_bits(k_byte_algo, k_mask_int_algo, k_shift_int_algo, v);
+        set_bits(k_byte_sec_mac, k_mask_mac_size, k_shift_mac_size, units);
+        mac_size_ = static_cast<size_t>(units) * 4;
     }
 
-    uint8_t get_int_algo() const
+    uint8_t get_mac_size_units() const
     {
-        return get_bits(k_byte_algo, k_mask_int_algo, k_shift_int_algo);
-    }
-
-    template <bool B = IsConst, typename = std::enable_if_t<!B>>
-    void set_conf_algo(uint8_t v)
-    {
-        set_bits(k_byte_algo, k_mask_conf_algo, k_shift_conf_algo, v);
-    }
-
-    uint8_t get_conf_algo() const
-    {
-        return get_bits(k_byte_algo, k_mask_conf_algo, k_shift_conf_algo);
+        return get_bits(k_byte_sec_mac, k_mask_mac_size, k_shift_mac_size);
     }
 
     template <bool B = IsConst, typename = std::enable_if_t<!B>>
@@ -257,7 +289,7 @@ public:
     template <bool B = IsConst, typename = std::enable_if_t<!B>>
     void set_mac_size(size_t mac_sz)
     {
-        mac_size_ = mac_sz;
+        set_mac_size_units(static_cast<uint8_t>(mac_sz / 4));
     }
 
     size_t get_mac_size() const
@@ -273,12 +305,12 @@ public:
     template <bool B = IsConst, typename = std::enable_if_t<!B>>
     void set_payload_type(payload_type_e type)
     {
-        base_[payload_type_offset()] = static_cast<uint8_t>(type);
+        base_[payload_type_offset()] = static_cast<std::byte>(type);
     }
 
     payload_type_e get_payload_type() const
     {
-        return static_cast<payload_type_e>(base_[payload_type_offset()]);
+        return static_cast<payload_type_e>(static_cast<uint8_t>(base_[payload_type_offset()]));
     }
 
     byte_ptr get_payload() const
@@ -338,9 +370,8 @@ public:
 private:
     static constexpr size_t k_byte_ttl          = 0;
     static constexpr size_t k_byte_version_type = 1;
-    static constexpr size_t k_byte_sec_ctx      = 2;
-    static constexpr size_t k_byte_algo         = 3;
-    static constexpr size_t k_byte_mac          = 4;
+    static constexpr size_t k_byte_sec_mac      = 2;
+    static constexpr size_t k_byte_mac          = 3;
 
     static constexpr uint8_t k_mask_reserved    = 0b10000000;
     static constexpr uint8_t k_mask_version     = 0b01111100;
@@ -349,10 +380,10 @@ private:
     static constexpr uint8_t k_shift_version    = 2;
     static constexpr uint8_t k_shift_frame_type = 0;
 
-    static constexpr uint8_t k_mask_int_algo  = 0b11110000;
-    static constexpr uint8_t k_mask_conf_algo = 0b00001111;
-    static constexpr uint8_t k_shift_int_algo = 4;
-    static constexpr uint8_t k_shift_conf_algo = 0;
+    static constexpr uint8_t k_mask_sec_ctx     = 0b11110000;
+    static constexpr uint8_t k_mask_mac_size    = 0b00001111;
+    static constexpr uint8_t k_shift_sec_ctx    = 4;
+    static constexpr uint8_t k_shift_mac_size   = 0;
 
     uint8_t get_bits(size_t index, uint8_t mask, uint8_t shift) const
     {
@@ -362,9 +393,9 @@ private:
     template <bool B = IsConst, typename = std::enable_if_t<!B>>
     void set_bits(size_t index, uint8_t mask, uint8_t shift, uint8_t value)
     {
-        uint8_t byte = base_[index] & static_cast<uint8_t>(~mask);
+        uint8_t byte = static_cast<uint8_t>(base_[index]) & static_cast<uint8_t>(~mask);
         byte |= static_cast<uint8_t>((value << shift) & mask);
-        base_[index] = byte;
+        base_[index] = static_cast<std::byte>(byte);
     }
 
     uint32_t read_u32(size_t offset) const
@@ -378,10 +409,10 @@ private:
     template <bool B = IsConst, typename = std::enable_if_t<!B>>
     void write_u32(size_t offset, uint32_t value)
     {
-        base_[offset]     = static_cast<uint8_t>((value >> 24) & 0xFF);
-        base_[offset + 1] = static_cast<uint8_t>((value >> 16) & 0xFF);
-        base_[offset + 2] = static_cast<uint8_t>((value >> 8) & 0xFF);
-        base_[offset + 3] = static_cast<uint8_t>(value & 0xFF);
+        base_[offset]     = static_cast<std::byte>((value >> 24) & 0xFF);
+        base_[offset + 1] = static_cast<std::byte>((value >> 16) & 0xFF);
+        base_[offset + 2] = static_cast<std::byte>((value >> 8) & 0xFF);
+        base_[offset + 3] = static_cast<std::byte>(value & 0xFF);
     }
 
     byte_ptr base_   = nullptr;
@@ -414,7 +445,12 @@ inline bool validate_frame(const frame_const_t& frame)
         return false;
     }
 
-    if (frame.get_mac_size() != integrity_mac_size(frame.get_int_algo()))
+    if (frame.get_mac_size() != static_cast<size_t>(frame.get_mac_size_units()) * 4)
+    {
+        return false;
+    }
+
+    if (frame.get_sec_ctx() == k_sec_ctx_none && frame.get_mac_size() != 0)
     {
         return false;
     }
@@ -423,17 +459,16 @@ inline bool validate_frame(const frame_const_t& frame)
 }
 
 template<typename BufferView>
-inline bool validate_frame_buffer(const BufferView& buffer, size_t mac_sz = 0)
+inline bool validate_frame_buffer(const BufferView& buffer)
 {
-    if (buffer.size() < frame_const_t::k_fixed_header_size + mac_sz + frame_const_t::k_payload_type_size)
+    if (buffer.size() < frame_const_t::k_fixed_prefix_size)
     {
         return false;
     }
 
     frame_const_t frame(
-        reinterpret_cast<const uint8_t*>(buffer.data()),
-        buffer.size(),
-        mac_sz
+        reinterpret_cast<const std::byte*>(buffer.data()),
+        buffer.size()
     );
     return validate_frame(frame);
 }

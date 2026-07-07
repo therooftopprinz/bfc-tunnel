@@ -170,8 +170,9 @@ add_test(NAME dh_tests COMMAND dh_tests)
 add_executable(bfc_tunnel_tests
   src/tests/protocol_tests.cpp
   src/tests/frame_tests.cpp
+  src/tests/msg1_tests.cpp
   src/tests/gtestmain.cpp
 )
-target_link_libraries(bfc_tunnel_tests PRIVATE GTest::gtest bfc_tunnel)
+target_link_libraries(bfc_tunnel_tests PRIVATE GTest::gtest bfc_tunnel botan::botan-static)
 target_compile_options(bfc_tunnel_tests PRIVATE ${BFC_TUNNEL_COMPILE_WARNINGS})
 add_test(NAME bfc_tunnel_tests COMMAND bfc_tunnel_tests)

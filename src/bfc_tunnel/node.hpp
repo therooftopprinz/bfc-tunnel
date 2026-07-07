@@ -71,14 +71,16 @@ using port_by_address_map = std::unordered_map<std::string, port_ptr_t>;
 struct security_ctx_s
 {
     uint8_t    id;
+    uint64_t   creation_id;
     key_t      integrity_key;
     key_t      confidentiality_key;
     uint8_t    integrity_algorithm;
     uint8_t    confidentiality_algorithm;
-    timer_id_t timer_id;
     bool       is_expiring = false;
+    timer_id_t timer_id;
 };
 
+using security_ctx_t  = std::optional<security_ctx_s>;
 using security_ctxs_t = std::deque<security_ctx_s>;
 
 /***********************************************
@@ -109,7 +111,8 @@ enum peer_transaction_status_e
     E_PEER_TRANSACTION_STATUS_VERIFICATION_FAILED,
     E_PEER_TRANSACTION_STATUS_UNSUPPORTED,
     E_PEER_TRANSACTION_STATUS_NO_SUPPORTED_ALGORITHM_PAIR,
-    E_PEER_TRANSACTION_STATUS_PEER_TEARDOWN
+    E_PEER_TRANSACTION_STATUS_PEER_TEARDOWN,
+    E_PEER_TRANSACTION_STATUS_PEER_EXPIRED
 };
 
 const char* to_string(peer_transaction_status_e status);
@@ -145,9 +148,7 @@ struct security_procedure_ctx_s
     {
         E_SEC_PROC_STATE_SENDER_QUEUED,
         E_SEC_PROC_STATE_SENDER_ONGOING,
-        E_SEC_PROC_STATE_SENDER_EXPIRED,
-        E_SEC_PROC_STATE_SENDER_UNSUPPORTED,
-        E_SEC_PROC_STATE_FAILED
+        E_SEC_PROC_STATE_SENDER_EXPIRED
     };
 
     uint8_t             id;
@@ -157,6 +158,7 @@ struct security_procedure_ctx_s
     frame_t             frame;
     cum::msg1           msg1;
     algo_pair_t         algo_pair_used;
+    uint64_t            creation_id;
 
     dhke_kk             dhke;
 };
@@ -175,6 +177,7 @@ struct peer_s
     security_ctxs_t           security_contexts;
     uint8_t                   sec_ctx_ctr = 0;
     uint32_t                  tx_sn = 0;
+    uint64_t                  context_creation_counter = 0;
 
     // transport
     peer_address_s            preferred_peer_address = {};
@@ -237,6 +240,9 @@ struct node_config_s
     uint64_t beacon_interval_ms             = 500;
     uint64_t check_peer_activity_interval_s = 15;
     uint64_t peer_timeout_s                 = 15;
+    uint64_t peer_security_ctx_timeout_s    = 120;
+    uint64_t peer_transaction_timeout_ms    = 500;
+    bool     network_key_seeder             = false;
 };
 
 class node : public std::enable_shared_from_this<node>
@@ -272,25 +278,31 @@ private:
     void handle_pdu               (const port_ptr_t& port, const sockaddr_t& from, const sock_buff_t& pdu);
     void handle_beacon            (const port_ptr_t& port, const sockaddr_t& from, const frame_const_t& frame);
 
-    void handle_btp_message(const port_ptr_t& port,const frame_const_t& frame, cum::msg1& msg);
-    void handle_btp_message(const port_ptr_t& port,const frame_const_t& frame, cum::msg2& msg);
-    void handle_btp_message(const port_ptr_t& port,const frame_const_t& frame, cum::exchange_network_keys& msg);
-    void handle_btp_message(const port_ptr_t& port,const frame_const_t& frame, cum::link_info& msg);
-    void handle_btp_message(const port_ptr_t& port,const frame_const_t& frame, cum::link_report& msg);
-    void handle_btp_message(const port_ptr_t& port,const frame_const_t& frame, cum::route_announce& msg);
-    void handle_btp_message(const port_ptr_t& port,const frame_const_t& frame, cum::n2n_indication& msg);
+    void handle_btp_message(const port_ptr_t& port, const sockaddr_t& from, const frame_const_t& frame, cum::msg1& msg);
+    void handle_btp_message(const port_ptr_t& port, const sockaddr_t& from, const frame_const_t& frame, cum::msg2& msg);
+    void handle_btp_message(const port_ptr_t& port, const sockaddr_t& from, const frame_const_t& frame, cum::exchange_network_keys& msg);
+    void handle_btp_message(const port_ptr_t& port, const sockaddr_t& from, const frame_const_t& frame, cum::link_info& msg);
+    void handle_btp_message(const port_ptr_t& port, const sockaddr_t& from, const frame_const_t& frame, cum::link_report& msg);
+    void handle_btp_message(const port_ptr_t& port, const sockaddr_t& from, const frame_const_t& frame, cum::route_announce& msg);
+    void handle_btp_message(const port_ptr_t& port, const sockaddr_t& from, const frame_const_t& frame, cum::n2n_indication& msg);
 
     peer_ptr_t          peer_create(const node_id_t& node_id, const peer_public_key_s& public_key);
+    peer_ptr_t          peer_lookup_or_create(const node_id_t& node_id, const port_ptr_t& port, const sockaddr_t& from);
     void                peer_update_link_activity(const peer_ptr_t& peer, const port_ptr_t& port, const sockaddr_t& from, size_t size);
+    bool                peer_supports_algorithm_pair(uint8_t integrity_algorithm, uint8_t confidentiality_algorithm) const;
+    void                peer_abort_sender_security_procedure(const peer_ptr_t& peer);
+    void                peer_send_msg2(const peer_ptr_t& peer, const port_ptr_t& port, const sockaddr_t& to, uint8_t msg1_id, cum::status_e status, const dhke_kk* dhke);
+    void                peer_schedule_sec_ctx_renewal_timer(const peer_ptr_t& peer, security_ctx_s& sec_ctx, uint64_t duration_s);
     void                peer_start_security_procedure(const peer_ptr_t& peer, bool force = false);
     uint8_t             peer_get_next_sec_ctx_id(const peer_ptr_t& peer);
     security_ctx_s&     peer_get_or_create_sec_ctx(const peer_ptr_t& peer, uint8_t id);
+    security_ctx_t      peer_get_sec_ctx(const peer_ptr_t& peer, uint8_t id);
     void                peer_process_pending_transactions(const peer_ptr_t& peer);
     void                peer_retry_transaction(const peer_ptr_t& peer);
     void                peer_complete_transaction(const peer_ptr_t& peer, uint8_t id, int code);
+    void                peer_expire_security_context(const peer_ptr_t& peer, uint8_t id, uint64_t creation_id);
     void                peer_schedule_check_activity();
     void                peer_cleanup(const peer_ptr_t& peer);
-    
     uint64_t            now_s();
     void                reconfigure();
 

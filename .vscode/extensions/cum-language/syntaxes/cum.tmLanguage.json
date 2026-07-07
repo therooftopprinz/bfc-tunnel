@@ -1,0 +1,150 @@
+{
+  "name": "CUM",
+  "scopeName": "source.cum",
+  "patterns": [
+    { "include": "#comments" },
+    { "include": "#constant-decl" },
+    { "include": "#using-decl" },
+    { "include": "#block-decl" },
+    { "include": "#sequence-field" },
+    { "include": "#enum-variant" },
+    { "include": "#choice-alt" },
+    { "include": "#type-expr" },
+    { "include": "#numbers" },
+    { "include": "#punctuation" }
+  ],
+  "repository": {
+    "comments": {
+      "patterns": [
+        {
+          "name": "comment.line.double-slash",
+          "match": "//.*$"
+        },
+        {
+          "name": "comment.block",
+          "begin": "/\\*",
+          "end": "\\*/"
+        }
+      ]
+    },
+    "declaration-keywords": {
+      "match": "\\b(constant|enumeration|using|choice|sequence)\\b",
+      "name": "keyword.declaration"
+    },
+    "type-modifiers": {
+      "match": "\\b(optional|dynamic|static|buffer)\\b",
+      "name": "keyword.other"
+    },
+    "primitive-types": {
+      "match": "\\b(u8|u16|u32|u64|s8|s16|s32|s64|i8|i16|i32|i64|byte|char|string|bool|f32|f64)\\b",
+      "name": "storage.type"
+    },
+    "constant-decl": {
+      "match": "\\b(constant)\\s+([A-Za-z_][A-Za-z0-9_]*)\\s*(=)\\s*([^;]+)(;)",
+      "captures": {
+        "1": { "name": "keyword.declaration" },
+        "2": { "name": "variable.other.constant" },
+        "3": { "name": "keyword.operator.assignment" },
+        "4": { "name": "constant.numeric" },
+        "5": { "name": "punctuation.terminator" }
+      }
+    },
+    "using-decl": {
+      "begin": "\\b(using)\\s+([A-Za-z_][A-Za-z0-9_]*)\\s*(=)\\s*",
+      "beginCaptures": {
+        "1": { "name": "keyword.declaration" },
+        "2": { "name": "entity.name.type" },
+        "3": { "name": "keyword.operator.assignment" }
+      },
+      "end": "(;)",
+      "endCaptures": {
+        "1": { "name": "punctuation.terminator" }
+      },
+      "patterns": [
+        { "include": "#type-expr" }
+      ]
+    },
+    "block-decl": {
+      "begin": "\\b(enumeration|choice|sequence)\\s+([A-Za-z_][A-Za-z0-9_]*)\\s*(\\{)",
+      "beginCaptures": {
+        "1": { "name": "keyword.declaration" },
+        "2": { "name": "entity.name.type" },
+        "3": { "name": "punctuation.section.block.begin" }
+      },
+      "end": "(\\})(;)",
+      "endCaptures": {
+        "1": { "name": "punctuation.section.block.end" },
+        "2": { "name": "punctuation.terminator" }
+      },
+      "patterns": [
+        { "include": "#comments" },
+        { "include": "#sequence-field" },
+        { "include": "#enum-variant" },
+        { "include": "#choice-alt" },
+        { "include": "#type-expr" },
+        { "include": "#numbers" },
+        { "include": "#punctuation" }
+      ]
+    },
+    "type-expr": {
+      "patterns": [
+        { "include": "#type-modifiers" },
+        { "include": "#primitive-types" },
+        {
+          "match": "\\b([A-Za-z_][A-Za-z0-9_]*)\\b",
+          "name": "entity.name.type"
+        },
+        {
+          "begin": "<",
+          "beginCaptures": {
+            "0": { "name": "punctuation.definition.typeparameters.begin" }
+          },
+          "end": ">",
+          "endCaptures": {
+            "0": { "name": "punctuation.definition.typeparameters.end" }
+          },
+          "patterns": [
+            { "include": "#type-expr" },
+            { "include": "#numbers" },
+            {
+              "match": ",",
+              "name": "punctuation.separator"
+            }
+          ]
+        }
+      ]
+    },
+    "sequence-field": {
+      "match": "([A-Za-z_][A-Za-z0-9_]*(?:<[^>]+>)?)\\s+([A-Za-z_][A-Za-z0-9_]*)\\s*([,;])",
+      "captures": {
+        "1": { "patterns": [{ "include": "#type-expr" }] },
+        "2": { "name": "variable.other.property" },
+        "3": { "name": "punctuation.terminator" }
+      }
+    },
+    "enum-variant": {
+      "match": "\\b([A-Za-z_][A-Za-z0-9_]*)\\s*(=)?\\s*(-?[0-9]+)?\\s*([,])?",
+      "captures": {
+        "1": { "name": "constant.other.enum" },
+        "2": { "name": "keyword.operator.assignment" },
+        "3": { "name": "constant.numeric" },
+        "4": { "name": "punctuation.separator" }
+      }
+    },
+    "choice-alt": {
+      "match": "\\b([A-Za-z_][A-Za-z0-9_]*)\\s*([,])",
+      "captures": {
+        "1": { "name": "entity.name.type" },
+        "2": { "name": "punctuation.separator" }
+      }
+    },
+    "numbers": {
+      "match": "\\b-?(?:0|[1-9][0-9]*)\\b",
+      "name": "constant.numeric"
+    },
+    "punctuation": {
+      "match": "[{}<>,;=]",
+      "name": "punctuation"
+    }
+  }
+}

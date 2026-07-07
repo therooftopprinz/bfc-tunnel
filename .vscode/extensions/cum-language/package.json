@@ -1,0 +1,37 @@
+{
+  "name": "cum-language",
+  "displayName": "CUM Language",
+  "description": "Syntax highlighting for Common Universal Messaging (.cum) files",
+  "version": "0.1.0",
+  "publisher": "bfc-tunnel",
+  "license": "MIT",
+  "engines": {
+    "vscode": "^1.74.0"
+  },
+  "categories": [
+    "Programming Languages"
+  ],
+  "contributes": {
+    "languages": [
+      {
+        "id": "cum",
+        "aliases": [
+          "CUM",
+          "cum",
+          "Common Universal Messaging"
+        ],
+        "extensions": [
+          ".cum"
+        ],
+        "configuration": "./language-configuration.json"
+      }
+    ],
+    "grammars": [
+      {
+        "language": "cum",
+        "scopeName": "source.cum",
+        "path": "./syntaxes/cum.tmLanguage.json"
+      }
+    ]
+  }
+}

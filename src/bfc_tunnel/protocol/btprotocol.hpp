@@ -28,6 +28,8 @@ struct msg1
     u8 confidentiality_algorithm;
     u8 dh_key_type;
     key_t ephemeral;
+    u64 duration_s;
+    u64 priority;
     key_t signature;
 };
 
@@ -130,6 +132,8 @@ inline void encode_per(const msg1& pIe, cum::per_codec_ctx& pCtx)
     encode_per(pIe.confidentiality_algorithm, pCtx);
     encode_per(pIe.dh_key_type, pCtx);
     encode_per(pIe.ephemeral, pCtx);
+    encode_per(pIe.duration_s, pCtx);
+    encode_per(pIe.priority, pCtx);
     encode_per(pIe.signature, pCtx);
 }
 
@@ -142,6 +146,8 @@ inline void decode_per(msg1& pIe, cum::per_codec_ctx& pCtx)
     decode_per(pIe.confidentiality_algorithm, pCtx);
     decode_per(pIe.dh_key_type, pCtx);
     decode_per(pIe.ephemeral, pCtx);
+    decode_per(pIe.duration_s, pCtx);
+    decode_per(pIe.priority, pCtx);
     decode_per(pIe.signature, pCtx);
 }
 
@@ -157,13 +163,15 @@ inline void str(const char* pName, const msg1& pIe, std::string& pCtx, bool pIsL
         pCtx = pCtx + "\"" + pName + "\":{";
     }
     size_t nOptional = 0;
-    size_t nMandatory = 7;
+    size_t nMandatory = 9;
     str("id", pIe.id, pCtx, !(--nMandatory+nOptional));
     str("sec_ctx", pIe.sec_ctx, pCtx, !(--nMandatory+nOptional));
     str("integrity_algorithm", pIe.integrity_algorithm, pCtx, !(--nMandatory+nOptional));
     str("confidentiality_algorithm", pIe.confidentiality_algorithm, pCtx, !(--nMandatory+nOptional));
     str("dh_key_type", pIe.dh_key_type, pCtx, !(--nMandatory+nOptional));
     str("ephemeral", pIe.ephemeral, pCtx, !(--nMandatory+nOptional));
+    str("duration_s", pIe.duration_s, pCtx, !(--nMandatory+nOptional));
+    str("priority", pIe.priority, pCtx, !(--nMandatory+nOptional));
     str("signature", pIe.signature, pCtx, !(--nMandatory+nOptional));
     pCtx = pCtx + "}";
     if (!pIsLast)

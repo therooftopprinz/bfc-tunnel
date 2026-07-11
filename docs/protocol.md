@@ -12,7 +12,7 @@
 
 A **node** is a participant in the overlay, identified by a **NodeID** within the shared address space.
 
-A **mesh** is the set of connections among nodes established by preconfigured transports.
+A **mesh** is the set of connections among nodes established by preconfigured transports. The transport can be unicast or multicast transports.
 
 The overlay comprises two complementary meshes. The **multicast transport mesh** links nodes reachable over multicast-like networks. The **unicast transport mesh** links nodes reachable over unicast UDP. A node may bridge the two meshes.
 
@@ -60,7 +60,7 @@ Multicast and unicast transport use different media but are equivalent for **BFC
 
 **Frame Types**
 
-Frame types include *Peer*, which is used in bootstrapping network configuration and security and is not routable; *Network*, which is used for routing and data delivery; which allows a node to pass a secured message through a peer when network security is not yet available; and Public, which is used for node beacon messages.
+Frame types include *Peer*, which is used in bootstrapping network configuration and security and is not routable; *Network*, which is used for routing and data delivery; *Network-over-peer* which allows a node to pass a secured message through a peer when network security is not yet available; and *Public*, which is used for node beacon messages.
 
 | Value | Name              | Description |
 |-------|-------------------|-------------|
@@ -92,8 +92,7 @@ Fields are encoded in network byte order (big-endian). Bit-fields that share a b
 
 ---
 
-Each node in the mesh maintains public keys for all the other nodes in the mesh.
-It is used for key exchange to generate keys for peer security.  
+Each node in the overlay network maintains public keys for all the other nodes in the nework if it wish to bootstrap through them. It is used for key exchange to generate keys for peer security.  
 
 ```mermaid
 sequenceDiagram
@@ -214,7 +213,7 @@ Sent on all transport types to identify active neighboring nodes.
 
 | Size | Type  | Field   |
 |------|-------|---------|
-| 4    | `u32` | node_id |
+| 1    | `u8`  | flag    |
 
 ---
 
@@ -222,12 +221,15 @@ Sent on all transport types to identify active neighboring nodes.
 
 | Size | Type  | Field                     |
 |------|-------|---------------------------|
+| 1    | `u8`  | id                        |
 | 1    | `u8`  | sec_ctx                   |
 | 1    | `u8`  | integrity_algorithm       |
 | 1    | `u8`  | confidentiality_algorithm |
 | 1    | `u8`  | dh_key_type               |
 | 1    | `u8`  | ephemeral_len             |
 | var  | `u8`  | ephemeral                 |
+| 8    | `u64` | duration_s                |
+| 8    | `u64` | priority                  |
 | 1    | `u8`  | signature_len             |
 | var  | `u8`  | signature                 |
 
@@ -235,6 +237,8 @@ Sent on all transport types to identify active neighboring nodes.
 
 | Size | Type | Field         |
 |------|------|---------------|
+| 1    | `u8` | id            |
+| 1    | `u8` | status        |
 | 1    | `u8` | ephemeral_len |
 | var  | `u8` | ephemeral     |
 | 1    | `u8` | signature_len |
@@ -260,7 +264,17 @@ Sent on all transport types to identify active neighboring nodes.
 | 1    | `u8`          | record_total |
 | var  | `network_key` | keys         |
 
+**Network Key Refresh**
+
+| Size | Type          | Field        |
+|------|---------------|--------------|
+| 1    | `u8`          | record_index |
+| 1    | `u8`          | record_total |
+| var  | `network_key` | keys         |
+
 ---
+
+**Link Info**
 
 | Size | Type  | Field          |
 |------|-------|----------------|
@@ -316,17 +330,17 @@ Sent on all transport types to identify active neighboring nodes.
 
 ### [Core.Messages.MessageTypes] Message Types
 
-| Value | Frame   | Name                   | Description                                                                                                        |
-|-------|---------|------------------------|--------------------------------------------------------------------------------------------------------------------|
-| 0x00  | PUBLIC  | BEACON                 | Used to broadcast active NodeId                                                                                    |
-| 0x01  | PEER    | MSG1                   | Used to send initiator's emphemeral key.                                                                           |
-| 0x02  | PEER    | MSG2                   | Used to send responder's emphemeral key.                                                                           |
-| 0x03  | PEER    | LINK_INFO              | Link telemetry counters.                                                                                           |
-| 0x04  | PEER    | LINK_REPORT            | Link quality report.                                                                                               |
-| 0x05  | NETWORK | ROUTE_ANNOUNCE         | Route distribution message.                                                                                        |
-| 0x06  | NETWORK | N2N_INDICATION         | Node-to-node endpoint indication.                                                                                  |
-| 0x07  | NETWORK | TUNNEL_DATA            | Opaque tunnel payload.                                                                                             |
-| 0x08  | PEER    | EXCHANGE_NETWORK_KEYS  | Network key exchange between peers.                                                                                  |
+| Value | Name                   | Description                                                                                                        |
+|-------|------------------------|--------------------------------------------------------------------------------------------------------------------|
+| 0x00  | BEACON                 | Used to broadcast active NodeId                                                                                    |
+| 0x01  | MSG1                   | Used to send initiator's emphemeral key.                                                                           |
+| 0x02  | MSG2                   | Used to send responder's emphemeral key.                                                                           |
+| 0x03  | LINK_INFO              | Link telemetry counters.                                                                                           |
+| 0x04  | LINK_REPORT            | Link quality report.                                                                                               |
+| 0x05  | ROUTE_ANNOUNCE         | Route distribution message.                                                                                        |
+| 0x06  | N2N_INDICATION         | Node-to-node endpoint indication.                                                                                  |
+| 0x07  | TUNNEL_DATA            | Opaque tunnel payload.                                                                                             |
+| 0x08  | EXCHANGE_NETWORK_KEYS  | Network key exchange between peers.                                                                                  |
 
 ---
 
@@ -384,11 +398,11 @@ Typically sent soon after processing a peer `LINK_INFO` so the estimate referenc
 | u16  | metric   | Path Metric              |
 
 ### 3.7 N2N_INDICATION
-**N2N** (*node-to-node transport availability*) is a transport property supported on both multicast and unicast media. **N2N_INDICATION** is an IP-based signaling message that carries reflexive public unicast endpoints (`host`, `port`) so nodes can attempt UDP hole punching and open an **outer transport** direct leg. Endpoint exchange alone does not establish connectivity: nodes must still complete the **P2P** peer-link handshake via the PEER security exchange (`MSG1` / `MSG2`, *Peer Link Establishment* above) to obtain the peer-cryptographic link.
+**N2N** (*node-to-node transport availability*) is a transport property supported on both multicast and unicast media. **N2N_INDICATION** is an IP-based signaling message that carries reflexive public unicast endpoints (`host`, `port`) so nodes can attempt UDP hole punching and open an **outer transport** direct leg. After endpoint exchange, the N2N exchange NETWORK frames immediately.
 
-A **requestor** typically begins N2N through a unicast **peer** (its bootstrap peer). Any member with **global transport** reachability to both `origin` and `target` may relay or assist N2N the same way—even one that became eligible only after establishing its own **P2P** peer link. Endpoint probing and keepalive behavior are implementation-defined.
+A **requestor** begins N2N through a unicast **peer** (its bootstrap peer). Any node with **global unicqst transport** reachability to both `origin` and `target` may relay or assist N2N the same way—even one that became eligible only after establishing its own **P2P** peer link. Endpoint probing and keepalive behavior are implementation-defined.
 
-`host` and `port` identify **`origin`'s** public UDP endpoint **as observed from `target`'s perspective**—the address `target` uses for hole punching. Members SHOULD leave these fields empty when sending to an assisting peer; the relay MUST populate them from the observed UDP source (or an equivalent member binding) before forwarding to `target`. When a hub is `origin`, it SHOULD set them to its published overlay endpoint. For member-originated indications, later relays may send UDP from a hub address while the payload retains the filled reflexive endpoint; relays forward non-empty peer-`origin` values unchanged unless policy dictates otherwise.
+`host` and `port` identify **`origin`'s** public UDP endpoint **as observed from `target`'s perspective**—the address `target` uses for hole punching. Members SHOULD leave these fields empty when sending to an assisting peer; the relay MUST populate them from the observed UDP source before forwarding to `target`. If the `origin` knows it's own public address it can skip that step. The `target` node then do the same procedure. 
 
 **Message Data**
 | Size | Field    | Description                                            |

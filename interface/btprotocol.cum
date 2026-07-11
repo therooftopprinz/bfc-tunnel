@@ -47,6 +47,13 @@ sequence network_key
 
 using network_keys = dynamic<network_key, 256>;
 
+sequence network_key_refresh
+{
+    u8            record_index;
+    u8            record_total;
+    network_keys  keys;
+};
+
 sequence exchange_network_keys
 {
     u8            record_index;

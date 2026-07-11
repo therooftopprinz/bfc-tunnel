@@ -494,11 +494,6 @@ void node:: handle_beacon(const port_ptr_t& port, const sockaddr_t& from, const 
 
     auto peer = peer_it->second;
     peer_update_link_activity(peer, port, from, frame.get_size());
-
-    if (port->type == port_s::UNICAST)
-    {
-        peer_start_security_procedure(peer);
-    }
 }
 
 void node::handle_btp_message(const port_ptr_t& port, const sockaddr_t& from, const frame_const_t& frame, cum::msg1& msg)

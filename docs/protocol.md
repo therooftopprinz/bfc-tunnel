@@ -105,27 +105,77 @@ Note Over A,B: Peer Security is now enabled
 
 ---
 
-### [Core.Flows.NetworkLinkEstablishment] Network Link Establishment
+### [Core.Flows.NetworkKeyAcquisition] Network Key Acquisition
 
 ---
 
+A node first discovers which peers advertise network security contexts via a public query, then fetches the private keys over an established peer-secure channel.
+
+**Public network security discovery**
+
 ```mermaid
 sequenceDiagram
-Participant A
-Participant B
-Participant C
+title Query Network Security
+participant A as Alice
+participant B as Bob
 
-Note Over B,C: Network Security
-Note Over A,B: Peer Link Establishment
-Note Over A,B: Security is now enabled
-A -->> B : (PEER) EXCHANGE_NETWORK_KEYS
-Note Over B: Shares Network Keys to A
-B -->> A : (PEER) EXCHANGE_NETWORK_KEYS
-Note Over A,B: Network Security is now enabled
-Note Over A,C: Network Security
+A -->> B : (PUBLIC) QUERY_NETWORK_SECURITY
+B -->> A : (PUBLIC) NETWORK_SECURITY_INFORMATION
+```
+
+Every node that receives `QUERY_NETWORK_SECURITY` MUST reply with `NETWORK_SECURITY_INFORMATION`.
+`NETWORK_SECURITY_INFORMATION` is advisory metadata only and MUST NOT be used for conflict resolution.
+
+Initial discovery responses select which peer(s) to contact for private key acquisition. The node MAY perform peer network key acquisition from one or more peers.
+
+**Private network key acquisition**
+
+```mermaid
+sequenceDiagram
+title Network Key Acquisition
+participant A as Alice
+participant B as Bob
+participant C as Carol
+
+Note over B,C: Network Security already established
+Note over A,B: Peer Link Establishment (skipped if already established)
+A -->> B : (PEER) NETWORK_KEYS_REQUEST
+B -->> A : (PEER) NETWORK_KEYS_RESPONSE
+Note over A,B: Network Security enabled on A
 A -->> B : (NETWORK, A to C) TUNNEL_DATA
 B -->> C : (NETWORK, A to C) TUNNEL_DATA
 ```
+
+If peer security is already established, MSG1/MSG2 MAY be skipped before `NETWORK_KEYS_REQUEST`.
+
+**Acquisition triggers**
+
+* On startup
+* On NETWORK RX when the security context is unrecognized
+* On NETWORK RX when the context is recognized but integrity verification fails
+* On NETWORK TX when no usable security context is available
+
+### [Core.Flows.NetworkKeyRefresh] Network Key Refresh
+
+---
+
+A node periodically (`node.network_key_refresh_interval_s`) advertises its active network keys with `NETWORK_KEY_REFRESH` on NETWORK frames.
+
+```mermaid
+sequenceDiagram
+title Network Key Refresh
+participant A as Alice
+participant B as Bob
+
+Note over A: timer (network_key_refresh_interval_s)
+A -->> B : (NETWORK) NETWORK_KEY_REFRESH
+Note over B: Install/update keys via conflict resolution
+```
+
+**Refresh triggers**
+
+* Timer
+
 ---
 ## [Core.BasicSecurity] Security
 
@@ -134,6 +184,8 @@ B -->> C : (NETWORK, A to C) TUNNEL_DATA
 
 Peer security establishes the keys used for confidentiality and integrity protection, and its algorithms used as well.
 It follows key Noise_KK_25519 for the key exchange.
+Mutual authentication is inherent in the KK pattern because each node holds the peer's static public key; session keys derived from the handshake are only usable when both parties know the matching static private keys.
+MSG1 and MSG2 carry no separate signature fields.
 MSG1 will be sent in plaintext (`sec_ctx` is `NONE`).
 MSG2 will be sent in accordance with MSG1. Peer security context is indexed by (n1, n2).
 n1 and n2 are node ids for initiator and responser (either of which), where n2 > n1.
@@ -199,7 +251,16 @@ title Key Exchange
 
 ---
 
+Network security protects NETWORK and NETWORK_OVER_PEER frames with a shared security context (`sec_ctx`).
+Each context carries integrity and confidentiality keys, a priority, and an absolute expiration time.
 
+**Conflict resolution**
+
+Conflict occurs when multiple candidates exist for the same `sec_ctx` with differing expiration time and/or priority.
+The oldest non-expiring key with the highest priority wins.
+A key is treated as expiring when `expiration_time_s` is less than 30 seconds from the current time.
+
+Receivers apply conflict resolution when installing keys from `NETWORK_KEYS_RESPONSE` or `NETWORK_KEY_REFRESH`.
 
 ## [Core.Messages] Messages
 
@@ -213,7 +274,13 @@ Sent on all transport types to identify active neighboring nodes.
 
 | Size | Type  | Field   |
 |------|-------|---------|
-| 1    | `u8`  | flag    |
+| 1    | `u8`  | flags   |
+
+**Beacon flags**
+
+| Value | Name                         | Description                                      |
+|-------|------------------------------|--------------------------------------------------|
+| 1     | `K_BEACON_FLAG_HAS_NETWORK_KEY` | Node holds at least one active network key. |
 
 ---
 
@@ -230,8 +297,6 @@ Sent on all transport types to identify active neighboring nodes.
 | var  | `u8`  | ephemeral                 |
 | 8    | `u64` | duration_s                |
 | 8    | `u64` | priority                  |
-| 1    | `u8`  | signature_len             |
-| var  | `u8`  | signature                 |
 
 **Msg2**
 
@@ -241,36 +306,67 @@ Sent on all transport types to identify active neighboring nodes.
 | 1    | `u8` | status        |
 | 1    | `u8` | ephemeral_len |
 | var  | `u8` | ephemeral     |
-| 1    | `u8` | signature_len |
-| var  | `u8` | signature     |
+
+**Network Key Information** (`network_key_information`)
+
+| Size | Type  | Field              |
+|------|-------|--------------------|
+| 1    | `u8`  | sec_ctx            |
+| 8    | `u64` | priority           |
+| 8    | `u64` | expiration_time_s  |
+
+**Query Network Security**
+
+| Size | Type | Field |
+|------|------|-------|
+| 1    | `u8` | id    |
+
+**Network Security Information**
+
+| Size | Type                        | Field         |
+|------|-----------------------------|---------------|
+| 1    | `u8`                        | id            |
+| 1    | `u8`                        | current_page  |
+| 1    | `u8`                        | total_page    |
+| 1    | `u8`                        | informations_len |
+| var  | `network_key_information`   | informations  |
 
 **Network Key**
 
 | Size | Type  | Field                     |
 |------|-------|---------------------------|
 | 1    | `u8`  | sec_ctx                   |
-| 1    | `u8`  | key_len                   |
-| var  | `u8`  | key                       |
-| 8    | `u64` | creation_time_us          |
-| 2    | `u16` | duration_s                |
+| 8    | `u64` | priority                  |
+| 8    | `u64` | expiration_time_s         |
 | 1    | `u8`  | integrity_algorithm       |
+| 1    | `u8`  | integrity_key_len         |
+| var  | `u8`  | integrity_key             |
 | 1    | `u8`  | confidentiality_algorithm |
+| 1    | `u8`  | confidentiality_key_len   |
+| var  | `u8`  | confidentiality_key       |
 
-**Exchange Network Keys**
+**Network Keys Request**
+
+| Size | Type | Field |
+|------|------|-------|
+| 1    | `u8` | id    |
+
+**Network Keys Response**
 
 | Size | Type          | Field        |
 |------|---------------|--------------|
-| 1    | `u8`          | record_index |
-| 1    | `u8`          | record_total |
+| 1    | `u8`          | id           |
+| 1    | `u8`          | current_page |
+| 1    | `u8`          | total_page   |
+| 1    | `u8`          | keys_len     |
 | var  | `network_key` | keys         |
 
 **Network Key Refresh**
 
-| Size | Type          | Field        |
-|------|---------------|--------------|
-| 1    | `u8`          | record_index |
-| 1    | `u8`          | record_total |
-| var  | `network_key` | keys         |
+| Size | Type          | Field    |
+|------|---------------|----------|
+| 1    | `u8`          | keys_len |
+| var  | `network_key` | keys     |
 
 ---
 
@@ -330,17 +426,21 @@ Sent on all transport types to identify active neighboring nodes.
 
 ### [Core.Messages.MessageTypes] Message Types
 
-| Value | Name                   | Description                                                                                                        |
-|-------|------------------------|--------------------------------------------------------------------------------------------------------------------|
-| 0x00  | BEACON                 | Used to broadcast active NodeId                                                                                    |
-| 0x01  | MSG1                   | Used to send initiator's emphemeral key.                                                                           |
-| 0x02  | MSG2                   | Used to send responder's emphemeral key.                                                                           |
-| 0x03  | LINK_INFO              | Link telemetry counters.                                                                                           |
-| 0x04  | LINK_REPORT            | Link quality report.                                                                                               |
-| 0x05  | ROUTE_ANNOUNCE         | Route distribution message.                                                                                        |
-| 0x06  | N2N_INDICATION         | Node-to-node endpoint indication.                                                                                  |
-| 0x07  | TUNNEL_DATA            | Opaque tunnel payload.                                                                                             |
-| 0x08  | EXCHANGE_NETWORK_KEYS  | Network key exchange between peers.                                                                                  |
+| Value | Name                          | Description                                                                                                        |
+|-------|-------------------------------|--------------------------------------------------------------------------------------------------------------------|
+| 0x00  | BEACON                        | Used to broadcast active NodeId                                                                                    |
+| 0x01  | MSG1                          | Used to send initiator's emphemeral key.                                                                           |
+| 0x02  | MSG2                          | Used to send responder's emphemeral key.                                                                           |
+| 0x03  | QUERY_NETWORK_SECURITY        | Public query for peer network security context metadata.                                                           |
+| 0x04  | NETWORK_SECURITY_INFORMATION  | Paginated public reply listing advertised network security contexts.                                               |
+| 0x05  | NETWORK_KEYS_REQUEST          | Request network keys from a peer (acquisition).                                                                    |
+| 0x06  | NETWORK_KEYS_RESPONSE         | Paginated network key response to a request.                                                                       |
+| 0x07  | NETWORK_KEY_REFRESH           | Periodic advertisement of active network keys.                                                                     |
+| 0x08  | LINK_INFO                     | Link telemetry counters.                                                                                           |
+| 0x09  | LINK_REPORT                   | Link quality report.                                                                                               |
+| 0x0A  | ROUTE_ANNOUNCE                | Route distribution message.                                                                                        |
+| 0x0B  | N2N_INDICATION                | Node-to-node endpoint indication.                                                                                  |
+| 0x0C  | TUNNEL_DATA                   | Opaque tunnel payload.                                                                                             |
 
 ---
 

@@ -4,7 +4,8 @@ enumeration status_e
 {
     OK,
     UNSUPPORTED,
-    VERIFICATION_FAILED
+    VERIFICATION_FAILED,
+    UKNOWN_PEER
 };
 
 constant K_BEACON_FLAG_HAS_NETWORK_KEY = 1;
@@ -24,7 +25,6 @@ sequence msg1
     key_t  ephemeral;
     u64    duration_s;
     u64    priority;
-    key_t  signature;
 };
 
 sequence msg2
@@ -32,32 +32,59 @@ sequence msg2
     u8        id;
     status_e  status;
     key_t     ephemeral;
-    key_t     signature;
+};
+
+
+sequence query_network_security
+{
+    u8     id;
+};
+
+sequence network_key_information
+{
+    u8     sec_ctx;
+    u64    priority;
+    u64    expiration_time_s;
+};
+
+using network_key_informations = dynamic<network_key_information, 256>;
+
+sequence network_security_information
+{
+    u8                        id;
+    u8                        current_page;
+    u8                        total_page;
+    network_key_informations  informations;
 };
 
 sequence network_key
 {
     u8     sec_ctx;
-    key_t  key;
-    u64    creation_time_us;
-    u16    duration_s;
+    u64    priority;
+    u64    expiration_time_s;
     u8     integrity_algorithm;
+    key_t  integrity_key;
     u8     confidentiality_algorithm;
+    key_t  confidentiality_key;
 };
 
 using network_keys = dynamic<network_key, 256>;
 
 sequence network_key_refresh
 {
-    u8            record_index;
-    u8            record_total;
     network_keys  keys;
 };
 
-sequence exchange_network_keys
+sequence network_keys_request
 {
-    u8            record_index;
-    u8            record_total;
+    u8            id;
+};
+
+sequence network_keys_response
+{
+    u8            id;
+    u8            current_page;
+    u8            total_page;
     network_keys  keys;
 };
 

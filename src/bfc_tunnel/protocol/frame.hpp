@@ -11,11 +11,16 @@ namespace cum
 {
 struct msg1;
 struct msg2;
+struct beacon;
+struct query_network_security;
+struct network_security_information;
+struct network_keys_request;
+struct network_keys_response;
+struct network_key_refresh;
 struct link_info;
 struct link_report;
 struct route_announce;
 struct n2n_indication;
-struct exchange_network_keys;
 } // namespace cum
 
 namespace bfc_tunnel
@@ -33,26 +38,35 @@ enum frame_type_e
 
 enum payload_type_e
 {
-    E_PAYLOAD_TYPE_BEACON                 = 0x00,
-    E_PAYLOAD_TYPE_MSG1                   = 0x01,
-    E_PAYLOAD_TYPE_MSG2                   = 0x02,
-    E_PAYLOAD_TYPE_LINK_INFO              = 0x03,
-    E_PAYLOAD_TYPE_LINK_REPORT            = 0x04,
-    E_PAYLOAD_TYPE_ROUTE_ANNOUNCE         = 0x05,
-    E_PAYLOAD_TYPE_N2N_INDICATION         = 0x06,
-    E_PAYLOAD_TYPE_TUNNEL_DATA            = 0x07,
-    E_PAYLOAD_TYPE_EXCHANGE_NETWORK_KEYS  = 0x08,
+    E_PAYLOAD_TYPE_BEACON                       = 0x00,
+    E_PAYLOAD_TYPE_MSG1                         = 0x01,
+    E_PAYLOAD_TYPE_MSG2                         = 0x02,
+    E_PAYLOAD_TYPE_QUERY_NETWORK_SECURITY       = 0x03,
+    E_PAYLOAD_TYPE_NETWORK_SECURITY_INFORMATION = 0x04,
+    E_PAYLOAD_TYPE_NETWORK_KEYS_REQUEST         = 0x05,
+    E_PAYLOAD_TYPE_NETWORK_KEYS_RESPONSE        = 0x06,
+    E_PAYLOAD_TYPE_NETWORK_KEY_REFRESH          = 0x07,
+    E_PAYLOAD_TYPE_LINK_INFO                    = 0x08,
+    E_PAYLOAD_TYPE_LINK_REPORT                  = 0x09,
+    E_PAYLOAD_TYPE_ROUTE_ANNOUNCE               = 0x0A,
+    E_PAYLOAD_TYPE_N2N_INDICATION               = 0x0B,
+    E_PAYLOAD_TYPE_TUNNEL_DATA                  = 0x0C,
 };
 
 template<typename T> struct msg_id;
 
-template<> struct msg_id<::cum::msg1>                  {static constexpr payload_type_e value = E_PAYLOAD_TYPE_MSG1;};
-template<> struct msg_id<::cum::msg2>                  {static constexpr payload_type_e value = E_PAYLOAD_TYPE_MSG2;};
-template<> struct msg_id<::cum::link_info>             {static constexpr payload_type_e value = E_PAYLOAD_TYPE_LINK_INFO;};
-template<> struct msg_id<::cum::link_report>           {static constexpr payload_type_e value = E_PAYLOAD_TYPE_LINK_REPORT;};
-template<> struct msg_id<::cum::route_announce>        {static constexpr payload_type_e value = E_PAYLOAD_TYPE_ROUTE_ANNOUNCE;};
-template<> struct msg_id<::cum::n2n_indication>        {static constexpr payload_type_e value = E_PAYLOAD_TYPE_N2N_INDICATION;};
-template<> struct msg_id<::cum::exchange_network_keys> {static constexpr payload_type_e value = E_PAYLOAD_TYPE_EXCHANGE_NETWORK_KEYS;};
+template<> struct msg_id<::cum::msg1>                         {static constexpr payload_type_e value = E_PAYLOAD_TYPE_MSG1;};
+template<> struct msg_id<::cum::msg2>                         {static constexpr payload_type_e value = E_PAYLOAD_TYPE_MSG2;};
+template<> struct msg_id<::cum::beacon>                       {static constexpr payload_type_e value = E_PAYLOAD_TYPE_BEACON;};
+template<> struct msg_id<::cum::query_network_security>       {static constexpr payload_type_e value = E_PAYLOAD_TYPE_QUERY_NETWORK_SECURITY;};
+template<> struct msg_id<::cum::network_security_information> {static constexpr payload_type_e value = E_PAYLOAD_TYPE_NETWORK_SECURITY_INFORMATION;};
+template<> struct msg_id<::cum::network_keys_request>         {static constexpr payload_type_e value = E_PAYLOAD_TYPE_NETWORK_KEYS_REQUEST;};
+template<> struct msg_id<::cum::network_keys_response>        {static constexpr payload_type_e value = E_PAYLOAD_TYPE_NETWORK_KEYS_RESPONSE;};
+template<> struct msg_id<::cum::network_key_refresh>          {static constexpr payload_type_e value = E_PAYLOAD_TYPE_NETWORK_KEY_REFRESH;};
+template<> struct msg_id<::cum::link_info>                    {static constexpr payload_type_e value = E_PAYLOAD_TYPE_LINK_INFO;};
+template<> struct msg_id<::cum::link_report>                  {static constexpr payload_type_e value = E_PAYLOAD_TYPE_LINK_REPORT;};
+template<> struct msg_id<::cum::route_announce>               {static constexpr payload_type_e value = E_PAYLOAD_TYPE_ROUTE_ANNOUNCE;};
+template<> struct msg_id<::cum::n2n_indication>               {static constexpr payload_type_e value = E_PAYLOAD_TYPE_N2N_INDICATION;};
 
 enum integrity_algorithm_e
 {
@@ -440,7 +454,7 @@ inline bool validate_frame(const frame_const_t& frame)
         return false;
     }
 
-    if (frame.get_payload_type() > E_PAYLOAD_TYPE_EXCHANGE_NETWORK_KEYS)
+    if (frame.get_payload_type() > E_PAYLOAD_TYPE_TUNNEL_DATA)
     {
         return false;
     }

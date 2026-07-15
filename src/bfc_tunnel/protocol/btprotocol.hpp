@@ -17,7 +17,14 @@ enum status_e
 {
     OK,
     UNSUPPORTED,
-    VERIFICATION_FAILED
+    VERIFICATION_FAILED,
+    UKNOWN_PEER
+};
+
+constexpr auto K_BEACON_FLAG_HAS_NETWORK_KEY = 1;
+struct beacon
+{
+    u8 flags;
 };
 
 struct msg1
@@ -30,7 +37,6 @@ struct msg1
     key_t ephemeral;
     u64 duration_s;
     u64 priority;
-    key_t signature;
 };
 
 struct msg2
@@ -38,24 +44,56 @@ struct msg2
     u8 id;
     status_e status;
     key_t ephemeral;
-    key_t signature;
+};
+
+struct query_network_security
+{
+    u8 id;
+};
+
+struct network_key_information
+{
+    u8 sec_ctx;
+    u64 priority;
+    u64 expiration_time_s;
+};
+
+using network_key_informations = cum::vector<network_key_information, 256>;
+struct network_security_information
+{
+    u8 id;
+    u8 current_page;
+    u8 total_page;
+    network_key_informations informations;
 };
 
 struct network_key
 {
     u8 sec_ctx;
-    key_t key;
-    u64 creation_time_us;
-    u16 duration_s;
+    u64 priority;
+    u64 expiration_time_s;
     u8 integrity_algorithm;
+    key_t integrity_key;
     u8 confidentiality_algorithm;
+    key_t confidentiality_key;
 };
 
 using network_keys = cum::vector<network_key, 256>;
-struct exchange_network_keys
+struct network_key_refresh
 {
-    u8 record_index;
-    u8 record_total;
+    network_keys keys;
+};
+
+struct network_keys_request
+{
+    u8 id;
+};
+
+struct network_keys_response
+{
+    u8 id;
+    u8 current_page;
+    u8 total_page;
     network_keys keys;
 };
 
@@ -116,6 +154,40 @@ inline void str(const char* pName, const status_e& pIe, std::string& pCtx, bool 
     if (status_e::OK == pIe) pCtx += "\"OK\"";
     if (status_e::UNSUPPORTED == pIe) pCtx += "\"UNSUPPORTED\"";
     if (status_e::VERIFICATION_FAILED == pIe) pCtx += "\"VERIFICATION_FAILED\"";
+    if (status_e::UKNOWN_PEER == pIe) pCtx += "\"UKNOWN_PEER\"";
+    pCtx = pCtx + "}";
+    if (!pIsLast)
+    {
+        pCtx += ",";
+    }
+}
+
+inline void encode_per(const beacon& pIe, cum::per_codec_ctx& pCtx)
+{
+    using namespace cum;
+    encode_per(pIe.flags, pCtx);
+}
+
+inline void decode_per(beacon& pIe, cum::per_codec_ctx& pCtx)
+{
+    using namespace cum;
+    decode_per(pIe.flags, pCtx);
+}
+
+inline void str(const char* pName, const beacon& pIe, std::string& pCtx, bool pIsLast)
+{
+    using namespace cum;
+    if (!pName)
+    {
+        pCtx = pCtx + "{";
+    }
+    else
+    {
+        pCtx = pCtx + "\"" + pName + "\":{";
+    }
+    size_t nOptional = 0;
+    size_t nMandatory = 1;
+    str("flags", pIe.flags, pCtx, !(--nMandatory+nOptional));
     pCtx = pCtx + "}";
     if (!pIsLast)
     {
@@ -134,7 +206,6 @@ inline void encode_per(const msg1& pIe, cum::per_codec_ctx& pCtx)
     encode_per(pIe.ephemeral, pCtx);
     encode_per(pIe.duration_s, pCtx);
     encode_per(pIe.priority, pCtx);
-    encode_per(pIe.signature, pCtx);
 }
 
 inline void decode_per(msg1& pIe, cum::per_codec_ctx& pCtx)
@@ -148,7 +219,6 @@ inline void decode_per(msg1& pIe, cum::per_codec_ctx& pCtx)
     decode_per(pIe.ephemeral, pCtx);
     decode_per(pIe.duration_s, pCtx);
     decode_per(pIe.priority, pCtx);
-    decode_per(pIe.signature, pCtx);
 }
 
 inline void str(const char* pName, const msg1& pIe, std::string& pCtx, bool pIsLast)
@@ -163,7 +233,7 @@ inline void str(const char* pName, const msg1& pIe, std::string& pCtx, bool pIsL
         pCtx = pCtx + "\"" + pName + "\":{";
     }
     size_t nOptional = 0;
-    size_t nMandatory = 9;
+    size_t nMandatory = 8;
     str("id", pIe.id, pCtx, !(--nMandatory+nOptional));
     str("sec_ctx", pIe.sec_ctx, pCtx, !(--nMandatory+nOptional));
     str("integrity_algorithm", pIe.integrity_algorithm, pCtx, !(--nMandatory+nOptional));
@@ -172,7 +242,6 @@ inline void str(const char* pName, const msg1& pIe, std::string& pCtx, bool pIsL
     str("ephemeral", pIe.ephemeral, pCtx, !(--nMandatory+nOptional));
     str("duration_s", pIe.duration_s, pCtx, !(--nMandatory+nOptional));
     str("priority", pIe.priority, pCtx, !(--nMandatory+nOptional));
-    str("signature", pIe.signature, pCtx, !(--nMandatory+nOptional));
     pCtx = pCtx + "}";
     if (!pIsLast)
     {
@@ -186,7 +255,6 @@ inline void encode_per(const msg2& pIe, cum::per_codec_ctx& pCtx)
     encode_per(pIe.id, pCtx);
     encode_per(pIe.status, pCtx);
     encode_per(pIe.ephemeral, pCtx);
-    encode_per(pIe.signature, pCtx);
 }
 
 inline void decode_per(msg2& pIe, cum::per_codec_ctx& pCtx)
@@ -195,7 +263,6 @@ inline void decode_per(msg2& pIe, cum::per_codec_ctx& pCtx)
     decode_per(pIe.id, pCtx);
     decode_per(pIe.status, pCtx);
     decode_per(pIe.ephemeral, pCtx);
-    decode_per(pIe.signature, pCtx);
 }
 
 inline void str(const char* pName, const msg2& pIe, std::string& pCtx, bool pIsLast)
@@ -210,11 +277,124 @@ inline void str(const char* pName, const msg2& pIe, std::string& pCtx, bool pIsL
         pCtx = pCtx + "\"" + pName + "\":{";
     }
     size_t nOptional = 0;
-    size_t nMandatory = 4;
+    size_t nMandatory = 3;
     str("id", pIe.id, pCtx, !(--nMandatory+nOptional));
     str("status", pIe.status, pCtx, !(--nMandatory+nOptional));
     str("ephemeral", pIe.ephemeral, pCtx, !(--nMandatory+nOptional));
-    str("signature", pIe.signature, pCtx, !(--nMandatory+nOptional));
+    pCtx = pCtx + "}";
+    if (!pIsLast)
+    {
+        pCtx += ",";
+    }
+}
+
+inline void encode_per(const query_network_security& pIe, cum::per_codec_ctx& pCtx)
+{
+    using namespace cum;
+    encode_per(pIe.id, pCtx);
+}
+
+inline void decode_per(query_network_security& pIe, cum::per_codec_ctx& pCtx)
+{
+    using namespace cum;
+    decode_per(pIe.id, pCtx);
+}
+
+inline void str(const char* pName, const query_network_security& pIe, std::string& pCtx, bool pIsLast)
+{
+    using namespace cum;
+    if (!pName)
+    {
+        pCtx = pCtx + "{";
+    }
+    else
+    {
+        pCtx = pCtx + "\"" + pName + "\":{";
+    }
+    size_t nOptional = 0;
+    size_t nMandatory = 1;
+    str("id", pIe.id, pCtx, !(--nMandatory+nOptional));
+    pCtx = pCtx + "}";
+    if (!pIsLast)
+    {
+        pCtx += ",";
+    }
+}
+
+inline void encode_per(const network_key_information& pIe, cum::per_codec_ctx& pCtx)
+{
+    using namespace cum;
+    encode_per(pIe.sec_ctx, pCtx);
+    encode_per(pIe.priority, pCtx);
+    encode_per(pIe.expiration_time_s, pCtx);
+}
+
+inline void decode_per(network_key_information& pIe, cum::per_codec_ctx& pCtx)
+{
+    using namespace cum;
+    decode_per(pIe.sec_ctx, pCtx);
+    decode_per(pIe.priority, pCtx);
+    decode_per(pIe.expiration_time_s, pCtx);
+}
+
+inline void str(const char* pName, const network_key_information& pIe, std::string& pCtx, bool pIsLast)
+{
+    using namespace cum;
+    if (!pName)
+    {
+        pCtx = pCtx + "{";
+    }
+    else
+    {
+        pCtx = pCtx + "\"" + pName + "\":{";
+    }
+    size_t nOptional = 0;
+    size_t nMandatory = 3;
+    str("sec_ctx", pIe.sec_ctx, pCtx, !(--nMandatory+nOptional));
+    str("priority", pIe.priority, pCtx, !(--nMandatory+nOptional));
+    str("expiration_time_s", pIe.expiration_time_s, pCtx, !(--nMandatory+nOptional));
+    pCtx = pCtx + "}";
+    if (!pIsLast)
+    {
+        pCtx += ",";
+    }
+}
+
+inline void encode_per(const network_security_information& pIe, cum::per_codec_ctx& pCtx)
+{
+    using namespace cum;
+    encode_per(pIe.id, pCtx);
+    encode_per(pIe.current_page, pCtx);
+    encode_per(pIe.total_page, pCtx);
+    encode_per(pIe.informations, pCtx);
+}
+
+inline void decode_per(network_security_information& pIe, cum::per_codec_ctx& pCtx)
+{
+    using namespace cum;
+    decode_per(pIe.id, pCtx);
+    decode_per(pIe.current_page, pCtx);
+    decode_per(pIe.total_page, pCtx);
+    decode_per(pIe.informations, pCtx);
+}
+
+inline void str(const char* pName, const network_security_information& pIe, std::string& pCtx, bool pIsLast)
+{
+    using namespace cum;
+    if (!pName)
+    {
+        pCtx = pCtx + "{";
+    }
+    else
+    {
+        pCtx = pCtx + "\"" + pName + "\":{";
+    }
+    size_t nOptional = 0;
+    size_t nMandatory = 4;
+    str("id", pIe.id, pCtx, !(--nMandatory+nOptional));
+    str("current_page", pIe.current_page, pCtx, !(--nMandatory+nOptional));
+    str("total_page", pIe.total_page, pCtx, !(--nMandatory+nOptional));
+    str("informations", pIe.informations, pCtx, !(--nMandatory+nOptional));
     pCtx = pCtx + "}";
     if (!pIsLast)
     {
@@ -226,22 +406,24 @@ inline void encode_per(const network_key& pIe, cum::per_codec_ctx& pCtx)
 {
     using namespace cum;
     encode_per(pIe.sec_ctx, pCtx);
-    encode_per(pIe.key, pCtx);
-    encode_per(pIe.creation_time_us, pCtx);
-    encode_per(pIe.duration_s, pCtx);
+    encode_per(pIe.priority, pCtx);
+    encode_per(pIe.expiration_time_s, pCtx);
     encode_per(pIe.integrity_algorithm, pCtx);
+    encode_per(pIe.integrity_key, pCtx);
     encode_per(pIe.confidentiality_algorithm, pCtx);
+    encode_per(pIe.confidentiality_key, pCtx);
 }
 
 inline void decode_per(network_key& pIe, cum::per_codec_ctx& pCtx)
 {
     using namespace cum;
     decode_per(pIe.sec_ctx, pCtx);
-    decode_per(pIe.key, pCtx);
-    decode_per(pIe.creation_time_us, pCtx);
-    decode_per(pIe.duration_s, pCtx);
+    decode_per(pIe.priority, pCtx);
+    decode_per(pIe.expiration_time_s, pCtx);
     decode_per(pIe.integrity_algorithm, pCtx);
+    decode_per(pIe.integrity_key, pCtx);
     decode_per(pIe.confidentiality_algorithm, pCtx);
+    decode_per(pIe.confidentiality_key, pCtx);
 }
 
 inline void str(const char* pName, const network_key& pIe, std::string& pCtx, bool pIsLast)
@@ -256,13 +438,14 @@ inline void str(const char* pName, const network_key& pIe, std::string& pCtx, bo
         pCtx = pCtx + "\"" + pName + "\":{";
     }
     size_t nOptional = 0;
-    size_t nMandatory = 6;
+    size_t nMandatory = 7;
     str("sec_ctx", pIe.sec_ctx, pCtx, !(--nMandatory+nOptional));
-    str("key", pIe.key, pCtx, !(--nMandatory+nOptional));
-    str("creation_time_us", pIe.creation_time_us, pCtx, !(--nMandatory+nOptional));
-    str("duration_s", pIe.duration_s, pCtx, !(--nMandatory+nOptional));
+    str("priority", pIe.priority, pCtx, !(--nMandatory+nOptional));
+    str("expiration_time_s", pIe.expiration_time_s, pCtx, !(--nMandatory+nOptional));
     str("integrity_algorithm", pIe.integrity_algorithm, pCtx, !(--nMandatory+nOptional));
+    str("integrity_key", pIe.integrity_key, pCtx, !(--nMandatory+nOptional));
     str("confidentiality_algorithm", pIe.confidentiality_algorithm, pCtx, !(--nMandatory+nOptional));
+    str("confidentiality_key", pIe.confidentiality_key, pCtx, !(--nMandatory+nOptional));
     pCtx = pCtx + "}";
     if (!pIsLast)
     {
@@ -270,23 +453,19 @@ inline void str(const char* pName, const network_key& pIe, std::string& pCtx, bo
     }
 }
 
-inline void encode_per(const exchange_network_keys& pIe, cum::per_codec_ctx& pCtx)
+inline void encode_per(const network_key_refresh& pIe, cum::per_codec_ctx& pCtx)
 {
     using namespace cum;
-    encode_per(pIe.record_index, pCtx);
-    encode_per(pIe.record_total, pCtx);
     encode_per(pIe.keys, pCtx);
 }
 
-inline void decode_per(exchange_network_keys& pIe, cum::per_codec_ctx& pCtx)
+inline void decode_per(network_key_refresh& pIe, cum::per_codec_ctx& pCtx)
 {
     using namespace cum;
-    decode_per(pIe.record_index, pCtx);
-    decode_per(pIe.record_total, pCtx);
     decode_per(pIe.keys, pCtx);
 }
 
-inline void str(const char* pName, const exchange_network_keys& pIe, std::string& pCtx, bool pIsLast)
+inline void str(const char* pName, const network_key_refresh& pIe, std::string& pCtx, bool pIsLast)
 {
     using namespace cum;
     if (!pName)
@@ -298,9 +477,82 @@ inline void str(const char* pName, const exchange_network_keys& pIe, std::string
         pCtx = pCtx + "\"" + pName + "\":{";
     }
     size_t nOptional = 0;
-    size_t nMandatory = 3;
-    str("record_index", pIe.record_index, pCtx, !(--nMandatory+nOptional));
-    str("record_total", pIe.record_total, pCtx, !(--nMandatory+nOptional));
+    size_t nMandatory = 1;
+    str("keys", pIe.keys, pCtx, !(--nMandatory+nOptional));
+    pCtx = pCtx + "}";
+    if (!pIsLast)
+    {
+        pCtx += ",";
+    }
+}
+
+inline void encode_per(const network_keys_request& pIe, cum::per_codec_ctx& pCtx)
+{
+    using namespace cum;
+    encode_per(pIe.id, pCtx);
+}
+
+inline void decode_per(network_keys_request& pIe, cum::per_codec_ctx& pCtx)
+{
+    using namespace cum;
+    decode_per(pIe.id, pCtx);
+}
+
+inline void str(const char* pName, const network_keys_request& pIe, std::string& pCtx, bool pIsLast)
+{
+    using namespace cum;
+    if (!pName)
+    {
+        pCtx = pCtx + "{";
+    }
+    else
+    {
+        pCtx = pCtx + "\"" + pName + "\":{";
+    }
+    size_t nOptional = 0;
+    size_t nMandatory = 1;
+    str("id", pIe.id, pCtx, !(--nMandatory+nOptional));
+    pCtx = pCtx + "}";
+    if (!pIsLast)
+    {
+        pCtx += ",";
+    }
+}
+
+inline void encode_per(const network_keys_response& pIe, cum::per_codec_ctx& pCtx)
+{
+    using namespace cum;
+    encode_per(pIe.id, pCtx);
+    encode_per(pIe.current_page, pCtx);
+    encode_per(pIe.total_page, pCtx);
+    encode_per(pIe.keys, pCtx);
+}
+
+inline void decode_per(network_keys_response& pIe, cum::per_codec_ctx& pCtx)
+{
+    using namespace cum;
+    decode_per(pIe.id, pCtx);
+    decode_per(pIe.current_page, pCtx);
+    decode_per(pIe.total_page, pCtx);
+    decode_per(pIe.keys, pCtx);
+}
+
+inline void str(const char* pName, const network_keys_response& pIe, std::string& pCtx, bool pIsLast)
+{
+    using namespace cum;
+    if (!pName)
+    {
+        pCtx = pCtx + "{";
+    }
+    else
+    {
+        pCtx = pCtx + "\"" + pName + "\":{";
+    }
+    size_t nOptional = 0;
+    size_t nMandatory = 4;
+    str("id", pIe.id, pCtx, !(--nMandatory+nOptional));
+    str("current_page", pIe.current_page, pCtx, !(--nMandatory+nOptional));
+    str("total_page", pIe.total_page, pCtx, !(--nMandatory+nOptional));
     str("keys", pIe.keys, pCtx, !(--nMandatory+nOptional));
     pCtx = pCtx + "}";
     if (!pIsLast)

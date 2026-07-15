@@ -1,5 +1,7 @@
 {
   "files.associations": {
     "*.cum": "cum"
-  }
+  },
+  "workbench.editor.revealIfOpen": true,
+  "workbench.editor.enablePreviewFromCodeNavigation": false
 }

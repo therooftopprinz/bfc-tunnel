@@ -171,6 +171,7 @@ add_executable(bfc_tunnel_tests
   src/tests/protocol_tests.cpp
   src/tests/frame_tests.cpp
   src/tests/msg1_tests.cpp
+  src/tests/network_key_tests.cpp
   src/tests/gtestmain.cpp
 )
 target_link_libraries(bfc_tunnel_tests PRIVATE GTest::gtest bfc_tunnel botan::botan-static)

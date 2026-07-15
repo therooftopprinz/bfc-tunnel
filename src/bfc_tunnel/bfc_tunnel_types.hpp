@@ -18,11 +18,13 @@ struct peer_s;
 constexpr uint64_t k_completion_code_success = 0;
 constexpr uint64_t k_completion_code_failure = 1;
 
-using cv_reactor_cb_t  = std::function<void()>;
-using io_reactor_cb_t  = std::function<void()>;
-using transaction_cb_t = std::function<void(node&, const std::shared_ptr<peer_s>&, uint8_t id)>;
-using completion_cb_t  = std::function<void(node&, const std::shared_ptr<peer_s>&, uint8_t id, int code)>;
-using expiration_cb_t  = std::function<void(node&, const std::shared_ptr<peer_s>&, uint8_t id)>;
+using cv_reactor_cb_t          = std::function<void()>;
+using io_reactor_cb_t          = std::function<void()>;
+using transaction_cb_t         = std::function<void(node&, const std::shared_ptr<peer_s>&, uint8_t id)>;
+using completion_cb_t          = std::function<void(node&, const std::shared_ptr<peer_s>&, uint8_t id, int code)>;
+using expiration_cb_t          = std::function<void(node&, const std::shared_ptr<peer_s>&, uint8_t id)>;
+
+using procedure_completion_cb_t = std::function<void(node&, const std::shared_ptr<peer_s>&, int code)>;
 
 using reactor_cb_t     = cv_reactor_cb_t;
 using cv_reactor_t     = bfc::cv_reactor<cv_reactor_cb_t>;

@@ -26,7 +26,8 @@ bool encode_payload(frame_t& frame, const T& msg)
         return false;
     }
 
-    frame.resize(frame.get_payload_size() - ctx.size());
+    const size_t encoded_payload = frame.get_payload_size() - ctx.size();
+    frame.resize(frame.get_header_size() + encoded_payload);
 
     frame.set_payload_type(msg_id<T>::value);
     return true;

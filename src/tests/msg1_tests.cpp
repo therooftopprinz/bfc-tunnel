@@ -33,7 +33,7 @@ TEST(msg1_btp_message, encode_decode_round_trip)
     msg.confidentiality_algorithm = 2;
     msg.dh_key_type               = 1;
     msg.ephemeral.assign({1, 2, 3, 4});
-    msg.duration_s                = 120;
+    msg.expiration_time_s         = 120;
     msg.priority                  = 42;
 
     const auto decoded = round_trip(msg);
@@ -43,7 +43,7 @@ TEST(msg1_btp_message, encode_decode_round_trip)
     EXPECT_EQ(decoded.confidentiality_algorithm, msg.confidentiality_algorithm);
     EXPECT_EQ(decoded.dh_key_type, msg.dh_key_type);
     EXPECT_EQ(decoded.ephemeral, msg.ephemeral);
-    EXPECT_EQ(decoded.duration_s, msg.duration_s);
+    EXPECT_EQ(decoded.expiration_time_s, msg.expiration_time_s);
     EXPECT_EQ(decoded.priority, msg.priority);
 }
 

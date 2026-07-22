@@ -8,8 +8,6 @@ enumeration status_e
     UKNOWN_PEER
 };
 
-constant K_BEACON_FLAG_HAS_NETWORK_KEY = 1;
-
 sequence beacon
 {
     u8     flags;
@@ -23,7 +21,7 @@ sequence msg1
     u8     confidentiality_algorithm;
     u8     dh_key_type;
     key_t  ephemeral;
-    u64    duration_s;
+    u64    expiration_time_s;
     u64    priority;
 };
 
@@ -37,7 +35,6 @@ sequence msg2
 
 sequence query_network_security
 {
-    u8     id;
 };
 
 sequence network_key_information
@@ -51,9 +48,6 @@ using network_key_informations = dynamic<network_key_information, 256>;
 
 sequence network_security_information
 {
-    u8                        id;
-    u8                        current_page;
-    u8                        total_page;
     network_key_informations  informations;
 };
 

@@ -11,6 +11,7 @@
 #include <algorithm>
 #include <cstring>
 #include <stdexcept>
+#include <vector>
 
 namespace bfc_tunnel
 {
@@ -123,6 +124,33 @@ bool verify_integrity_mac(uint8_t integrity_algorithm, const key_t& key, bfc::co
         return false;
     }
     return std::memcmp(computed.data(), mac.data(), computed.size()) == 0;
+}
+
+bool verify_frame_mac(const frame_const_t& frame, bfc::const_buffer_view pdu, uint8_t integrity_algorithm, const key_t& integrity_key)
+{
+    const size_t mac_size = frame.get_mac_size();
+    const size_t mac_offset = frame_const_t::k_fixed_prefix_size;
+
+    if (mac_size == 0)
+    {
+        return integrity_algorithm == E_EA_NONE;
+    }
+
+    if (pdu.size() < mac_offset + mac_size)
+    {
+        return false;
+    }
+
+    std::vector<std::byte> authenticated;
+    authenticated.reserve(pdu.size() - mac_size);
+    authenticated.insert(authenticated.end(), pdu.data(), pdu.data() + mac_offset);
+    authenticated.insert(authenticated.end(), pdu.data() + mac_offset + mac_size, pdu.data() + pdu.size());
+
+    return verify_integrity_mac(
+        integrity_algorithm,
+        integrity_key,
+        bfc::const_buffer_view(authenticated.data(), authenticated.size()),
+        bfc::const_buffer_view(pdu.data() + mac_offset, mac_size));
 }
 
 key_t sign_x25519(const key_t& private_key, bfc::const_buffer_view message)

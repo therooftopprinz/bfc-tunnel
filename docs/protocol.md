@@ -190,6 +190,11 @@ MSG1 will be sent in plaintext (`sec_ctx` is `NONE`).
 MSG2 will be sent in accordance with MSG1. Peer security context is indexed by (n1, n2).
 n1 and n2 are node ids for initiator and responser (either of which), where n2 > n1.
 
+Each peer security context carries an absolute `expiration_time_s` set from node config at handshake time.
+At 30 seconds before expiration the context is marked expiring and a new handshake is started so a replacement context can overlap.
+Contexts with more than 30 seconds remaining are preferred; an expiring context is used only when no fresher context is available.
+The expiring context is removed at its expiration time.
+
 In local broadcast transport it is possible to have concurrent MSG1 from n1 and n2,
 in this case the later MSG1 should be cancelled to let the earlier MSG1 complete the handshake. 
 
@@ -276,11 +281,8 @@ Sent on all transport types to identify active neighboring nodes.
 |------|-------|---------|
 | 1    | `u8`  | flags   |
 
-**Beacon flags**
-
-| Value | Name                         | Description                                      |
-|-------|------------------------------|--------------------------------------------------|
-| 1     | `K_BEACON_FLAG_HAS_NETWORK_KEY` | Node holds at least one active network key. |
+`flags` is reserved; set to 0. Network key presence is discovered via
+`query_network_security` / `network_security_information`, not the beacon.
 
 ---
 
@@ -295,7 +297,7 @@ Sent on all transport types to identify active neighboring nodes.
 | 1    | `u8`  | dh_key_type               |
 | 1    | `u8`  | ephemeral_len             |
 | var  | `u8`  | ephemeral                 |
-| 8    | `u64` | duration_s                |
+| 8    | `u64` | expiration_time_s         |
 | 8    | `u64` | priority                  |
 
 **Msg2**
@@ -317,17 +319,13 @@ Sent on all transport types to identify active neighboring nodes.
 
 **Query Network Security**
 
-| Size | Type | Field |
-|------|------|-------|
-| 1    | `u8` | id    |
+Empty payload. Recipients respond with one or more `network_security_information`
+messages (multiple messages may be used when the informations do not fit the link MTU).
 
 **Network Security Information**
 
 | Size | Type                        | Field         |
 |------|-----------------------------|---------------|
-| 1    | `u8`                        | id            |
-| 1    | `u8`                        | current_page  |
-| 1    | `u8`                        | total_page    |
 | 1    | `u8`                        | informations_len |
 | var  | `network_key_information`   | informations  |
 

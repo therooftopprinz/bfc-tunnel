@@ -46,7 +46,7 @@ TEST(network_key_messages, beacon_and_request_response_round_trip)
     cum::per_codec_ctx encode_ctx(buf.data(), buf.size());
 
     cum::beacon beacon_msg;
-    beacon_msg.flags = cum::K_BEACON_FLAG_HAS_NETWORK_KEY;
+    beacon_msg.flags = 0;
     cum::encode_per(beacon_msg, encode_ctx);
 
     cum::per_codec_ctx decode_beacon_ctx(buf.data(), buf.size() - encode_ctx.size());
@@ -97,26 +97,21 @@ TEST(network_key_messages, query_and_security_information_round_trip)
     cum::per_codec_ctx encode_ctx(buf.data(), buf.size());
 
     cum::query_network_security query;
-    query.id = 3;
     cum::encode_per(query, encode_ctx);
 
     cum::per_codec_ctx decode_query_ctx(buf.data(), buf.size() - encode_ctx.size());
     cum::query_network_security decoded_query;
     cum::decode_per(decoded_query, decode_query_ctx);
-    EXPECT_EQ(decoded_query.id, 3u);
+    (void)decoded_query;
 
     encode_ctx = cum::per_codec_ctx(buf.data(), buf.size());
     cum::network_security_information info;
-    info.id = 3;
-    info.current_page = 0;
-    info.total_page = 1;
     info.informations.push_back(cum::network_key_information{1, 42, 999});
     cum::encode_per(info, encode_ctx);
 
     cum::per_codec_ctx decode_info_ctx(buf.data(), buf.size() - encode_ctx.size());
     cum::network_security_information decoded_info;
     cum::decode_per(decoded_info, decode_info_ctx);
-    EXPECT_EQ(decoded_info.id, 3u);
     ASSERT_EQ(decoded_info.informations.size(), 1u);
     EXPECT_EQ(decoded_info.informations[0].sec_ctx, 1u);
     EXPECT_EQ(decoded_info.informations[0].priority, 42u);

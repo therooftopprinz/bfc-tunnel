@@ -99,6 +99,9 @@ struct network_key_ctx_s
     uint8_t          confidentiality_algorithm;
     key_t            confidentiality_key;
 
+    uint32_t         integrity_success = 0;
+    uint32_t         integrity_failure = 0;
+
     timer_id_t       expiration_timer_id;
 };
 
@@ -280,18 +283,21 @@ struct network_security_procedure_ctx_s
 {
     network_key_candidates_t  network_key_candidates;
     std::optional<timer_id_t> key_information_collect_timer_id;
+    std::optional<timer_id_t> query_retry_timer_id;
     peer_weak_ptr_t           ongoing_acquisition_peer;
 };
 
 struct node_config_s
 {
     uint64_t beacon_interval_ms               = 500;
-    uint64_t check_peer_activity_interval_s   = 15;
-    uint64_t peer_timeout_s                   = 15;
-    uint64_t peer_security_ctx_timeout_s      = 120;
-    uint64_t peer_transaction_timeout_ms      = 500;
-    uint64_t network_security_query_timeout_ms = 500;
-    uint64_t network_key_refresh_interval_s   = 30;
+    uint64_t check_peer_activity_interval_ms  = 500;
+    uint64_t default_peer_timeout_s           = 3;
+    uint64_t security_ctx_timeout_s           = 120;
+    uint64_t security_ctx_grace_period_s      = 30;
+    uint64_t transaction_timeout_ms           = 500;
+    uint64_t security_query_timeout_ms         = 500;
+    uint64_t query_network_security_retry_timeout_s = 6;
+    uint64_t key_refresh_interval_s           = 30;
     bool     network_key_seeder               = false;
 };
 
@@ -341,7 +347,7 @@ private:
     void handle_btp_message(const port_ptr_t& port, const sockaddr_t& from, const frame_const_t& frame, cum::n2n_indication& msg);
 
     peer_ptr_t                    peer_create(const node_id_t& node_id);
-    peer_ptr_t                    peer_lookup_or_create(const node_id_t& node_id, const port_ptr_t& port, const sockaddr_t& from);
+    peer_ptr_t                    peer_lookup(const node_id_t& node_id, const port_ptr_t& port, const sockaddr_t& from);
     void                          peer_update_link_activity(const peer_ptr_t& peer, const port_ptr_t& port, const sockaddr_t& from, size_t size);
     bool                          peer_supports_algorithm_pair(uint8_t integrity_algorithm, uint8_t confidentiality_algorithm) const;
     void                          peer_abort_sender_security_procedure(const peer_ptr_t& peer);
@@ -370,11 +376,8 @@ private:
     template<typename Msg> bool   peer_send_message(const peer_ptr_t& peer, const port_ptr_t& port, const sockaddr_t& to, const Msg& msg);
 
 
-    uint64_t                      now_s() const;
     void                          reconfigure();
 
-    bool                          network_has_keys() const;
-    bool                          network_has_usable_key(uint8_t sec_ctx) const;
     void                          network_seed_keys();
     void                          network_install_key(const cum::network_key& key);
     void                          network_install_keys(const cum::network_keys& keys);
@@ -384,10 +387,13 @@ private:
     void                          network_expire_key(uint8_t sec_ctx, uint64_t creation_id);
     void                          network_acquire_keys();
     void                          network_start_security_query_procedure();
+    void                          network_schedule_security_query_retry();
+    void                          network_cancel_security_query_retry();
     void                          network_finish_security_query_procedure();
     void                          network_build_acquisition_candidates();
     void                          network_start_next_key_acquisition();
     void                          network_on_key_acquisition_complete(const peer_ptr_t& peer, int code);
+    void                          network_complete_security_procedure();
     void                          network_schedule_key_refresh();
     void                          network_send_key_refresh();
     bool                          network_key_acquisition_in_progress() const;
@@ -396,7 +402,8 @@ private:
     template<typename Msg> void   network_send_public_message(const Msg& msg);
     bool                          network_accept_rx(const frame_const_t& frame, bfc::const_buffer_view pdu);
     bool                          network_try_send_frame(const port_ptr_t& port, const sockaddr_t& to, bfc::sized_buffer pdu, uint8_t sec_ctx);
-    const network_key_ctx_s*      network_get_key_ctx(uint8_t sec_ctx) const;
+    network_key_ctx_s*            get_network_sec_ctx(uint8_t sec_ctx);
+    const network_key_ctx_s*      get_network_sec_ctx(uint8_t sec_ctx) const;
 
     bool                          decode_beacon(const frame_const_t& frame) const;
 
@@ -404,11 +411,11 @@ private:
     node_config_s                    config;
 
     bool                             is_initialized = false;
-    downstream_identity_ptr_t        selected_downstream_identity;    
     peer_by_node_id_map              peers;
     ports_t                          ports;
     beacons_t                        beacons;
     sockaddrs_t                      static_peers;
+    downstream_identity_ptr_t        selected_downstream_identity;
     downstream_identities_t          downstream_identities;
     public_keys_t                    public_keys;
 

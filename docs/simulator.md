@@ -213,7 +213,7 @@ Commands
 ### Config Generation
 Each instance of node will be deployed in `sim/nodes/$node_name`
 File Structure
-* `sim/nodes/$node_name/cfg.ini` - main config file
+* `sim/nodes/$node_name/config.ini` - main config file
 * `sim/nodes/$node_name/private_key.csv` - this node private keys
 * `sim/nodes/$node_name/public_key.csv` - this network public keys
 
@@ -228,7 +228,7 @@ ${select node_id, private_key from $(/node print +node_name=$node_name)}
 ${select node_id, to_public_key(private_key) from '/node print'}
 ```
 
-#### cfg.ini
+#### config.ini
 ```
 security.private_key_file = private_keys.csv
 security.public_key_file  = public_keys.csv

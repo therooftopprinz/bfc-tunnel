@@ -1,13 +1,56 @@
 #include <gtest/gtest.h>
 
+#include <array>
+#include <cstring>
+
+#include <bfc/buffer.hpp>
+#include <bfc/sized_buffer.hpp>
+
 #include <bfc_tunnel/protocol/btprotocol.hpp>
 #include <bfc_tunnel/protocol/frame.hpp>
 #include <bfc_tunnel/security/key_utils.hpp>
+#include <bfc_tunnel/utils/msg_utils.hpp>
 
 namespace
 {
 
 using bfc_key_t = bfc_tunnel::key_t;
+
+bfc::sized_buffer make_network_refresh_frame(uint8_t sec_ctx,
+                                             uint8_t integrity_algorithm,
+                                             const bfc_key_t& integrity_key,
+                                             bool protect)
+{
+    bfc::sized_buffer pdu(1024);
+    auto frame = bfc_tunnel::prepare_frame(pdu);
+    frame.set_ttl(0);
+    frame.set_frame_type(bfc_tunnel::E_FRAME_TYPE_NETWORK);
+    frame.set_sec_ctx(sec_ctx);
+    frame.set_mac_size(bfc_tunnel::integrity_mac_size(integrity_algorithm));
+    frame.set_sn(0);
+    frame.set_src(1);
+    frame.set_dst(0xFFFFFFFF);
+    frame.set_ts(12345);
+
+    cum::network_key_refresh msg;
+    msg.keys.push_back(cum::network_key{
+        sec_ctx,
+        7,
+        999999,
+        integrity_algorithm,
+        bfc_key_t(32, 0x11),
+        bfc_tunnel::E_CA_NONE,
+        bfc_key_t{},
+    });
+
+    EXPECT_TRUE(bfc_tunnel::encode_payload(frame, msg));
+    pdu.resize(frame.get_size());
+    if (protect)
+    {
+        EXPECT_TRUE(bfc_tunnel::protect_frame_mac(frame, integrity_algorithm, integrity_key));
+    }
+    return pdu;
+}
 
 } // namespace
 
@@ -38,6 +81,59 @@ TEST(network_key_utils, derive_network_keys_differs_by_algorithm)
     EXPECT_NE(sha256.integrity_key, none.integrity_key);
     EXPECT_TRUE(none.integrity_key.empty());
     EXPECT_TRUE(none.confidentiality_key.empty());
+}
+
+TEST(network_key_utils, protect_and_verify_frame_mac_round_trip)
+{
+    const bfc_key_t integrity_key(32, 0x5a);
+    auto pdu = make_network_refresh_frame(3, bfc_tunnel::E_EA_HMAC_SHA2_256, integrity_key, true);
+
+    const auto frame = bfc_tunnel::to_frame(pdu.data(), pdu.size());
+    EXPECT_EQ(frame.get_frame_type(), bfc_tunnel::E_FRAME_TYPE_NETWORK);
+    EXPECT_EQ(frame.get_sec_ctx(), 3u);
+    EXPECT_EQ(frame.get_mac_size(), 32u);
+    EXPECT_EQ(frame.get_payload_type(), bfc_tunnel::E_PAYLOAD_TYPE_NETWORK_KEY_REFRESH);
+    EXPECT_TRUE(bfc_tunnel::verify_frame_mac(
+        frame,
+        bfc::const_buffer_view(pdu.data(), pdu.size()),
+        bfc_tunnel::E_EA_HMAC_SHA2_256,
+        integrity_key));
+}
+
+TEST(network_key_utils, verify_frame_mac_rejects_tamper_and_wrong_key)
+{
+    const bfc_key_t integrity_key(32, 0x5a);
+    auto pdu = make_network_refresh_frame(3, bfc_tunnel::E_EA_HMAC_SHA2_256, integrity_key, true);
+
+    pdu.data()[pdu.size() - 1] ^= std::byte{0x01};
+    auto frame = bfc_tunnel::to_frame(pdu.data(), pdu.size());
+    EXPECT_FALSE(bfc_tunnel::verify_frame_mac(
+        frame,
+        bfc::const_buffer_view(pdu.data(), pdu.size()),
+        bfc_tunnel::E_EA_HMAC_SHA2_256,
+        integrity_key));
+
+    pdu = make_network_refresh_frame(3, bfc_tunnel::E_EA_HMAC_SHA2_256, integrity_key, true);
+    frame = bfc_tunnel::to_frame(pdu.data(), pdu.size());
+    const bfc_key_t wrong_key(32, 0xa5);
+    EXPECT_FALSE(bfc_tunnel::verify_frame_mac(
+        frame,
+        bfc::const_buffer_view(pdu.data(), pdu.size()),
+        bfc_tunnel::E_EA_HMAC_SHA2_256,
+        wrong_key));
+}
+
+TEST(network_key_utils, protect_frame_mac_none_integrity)
+{
+    const bfc_key_t empty_key;
+    auto pdu = make_network_refresh_frame(1, bfc_tunnel::E_EA_NONE, empty_key, true);
+    const auto frame = bfc_tunnel::to_frame(pdu.data(), pdu.size());
+    EXPECT_EQ(frame.get_mac_size(), 0u);
+    EXPECT_TRUE(bfc_tunnel::verify_frame_mac(
+        frame,
+        bfc::const_buffer_view(pdu.data(), pdu.size()),
+        bfc_tunnel::E_EA_NONE,
+        empty_key));
 }
 
 TEST(network_key_messages, beacon_and_request_response_round_trip)

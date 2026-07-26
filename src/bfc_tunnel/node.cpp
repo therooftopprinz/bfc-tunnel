@@ -6,10 +6,10 @@
 #include <bfc_tunnel/utils/logger.hpp>
 #include <bfc_tunnel/utils/msg_utils.hpp>
 #include <bfc_tunnel/utils/number_utils.hpp>
+#include <bfc_tunnel/utils/time_utils.hpp>
 #include <bfc_tunnel/security/key_utils.hpp>
 
 #include <algorithm>
-#include <chrono>
 #include <cstring>
 
 namespace bfc_tunnel
@@ -18,14 +18,12 @@ namespace bfc_tunnel
 namespace
 {
 
-constexpr uint64_t k_sec_ctx_expiring_grace_s = 30;
-
 bool key_preference_is_better(uint64_t candidate_priority, uint64_t candidate_expiration_s,
                               uint64_t existing_priority, uint64_t existing_expiration_s,
-                              uint64_t now_s)
+                              uint64_t now_s, uint64_t grace_period_s)
 {
-    const bool existing_expiring  = existing_expiration_s < now_s + k_sec_ctx_expiring_grace_s;
-    const bool candidate_expiring = candidate_expiration_s < now_s + k_sec_ctx_expiring_grace_s;
+    const bool existing_expiring  = existing_expiration_s < now_s + grace_period_s;
+    const bool candidate_expiring = candidate_expiration_s < now_s + grace_period_s;
 
     if (existing_expiring != candidate_expiring)
     {
@@ -87,7 +85,7 @@ void node::initialize()
                 auto t = w.lock();
                 if (!t)
                 {
-                    log(*g_logger, E_LOG_BIT_SHOULD_NOT_HAPPEN, "node[nullptr]::initialize: Weak pointer expired!");
+                    log(*g_logger, E_LOG_BIT_SHOULD_NOT_HAPPEN, "node[nullptr]::initialize: node weak pointer is expired!");
                     return;
                 }
 
@@ -111,7 +109,13 @@ void node::uninitialize()
         [w = weak_from_this()]()
         {
             auto t = w.lock();
-            if (!t || !t->is_initialized)
+            if (!t)
+            {
+                log(*g_logger, E_LOG_BIT_SHOULD_NOT_HAPPEN, "node[nullptr]::uninitialize: node weak pointer is expired!");
+                return;
+            }
+
+            if (!t->is_initialized)
             {
                 return;
             }
@@ -143,6 +147,10 @@ void node::uninitialize()
             {
                 t->cv_reactor->get_timer().cancel(*t->network_security_procedure_ctx.key_information_collect_timer_id);
             }
+            if (t->network_security_procedure_ctx.query_retry_timer_id)
+            {
+                t->cv_reactor->get_timer().cancel(*t->network_security_procedure_ctx.query_retry_timer_id);
+            }
             t->network_security_procedure_ctx = {};
             t->cv_reactor->get_timer().cancel(t->network_key_refresh_timer_id);
             t->cv_reactor->get_timer().cancel(t->check_peer_activity_timer_id);
@@ -159,7 +167,7 @@ void node::add_port(const port_ptr_t& port)
             auto t = w.lock();
             if (!t)
             {
-                log(*g_logger, E_LOG_BIT_SHOULD_NOT_HAPPEN, "node[nullptr]::add_transport: Weak pointer expired!");
+                log(*g_logger, E_LOG_BIT_SHOULD_NOT_HAPPEN, "node[nullptr]::add_transport: node weak pointer is expired!");
                 return;
             }
 
@@ -181,7 +189,7 @@ void node::add_port(const port_ptr_t& port)
                         auto t = w.lock();
                         if (!t)
                         {
-                            log(*g_logger, E_LOG_BIT_SHOULD_NOT_HAPPEN, "node[nullptr]::add_port: Weak pointer expired!");
+                            log(*g_logger, E_LOG_BIT_SHOULD_NOT_HAPPEN, "node[nullptr]::add_port: node weak pointer is expired!");
                             return;
                         }
 
@@ -191,14 +199,14 @@ void node::add_port(const port_ptr_t& port)
 
             if (port->type == port_s::MULTICAST)
             {
-                t->add_beacon(std::make_shared<beacon_s>(beacon_s{peer_address_s{port, sockaddr_none{}}, 500}));
+                t->add_beacon(std::make_shared<beacon_s>(beacon_s{peer_address_s{port, sockaddr_none{}}, t->config.beacon_interval_ms}));
             }
             else
             {
                 for (auto& static_peer : t->static_peers)
                 {
-                    t->add_beacon(std::make_shared<beacon_s>(beacon_s{peer_address_s{port, static_peer}, 500}));
-                }   
+                    t->add_beacon(std::make_shared<beacon_s>(beacon_s{peer_address_s{port, static_peer}, t->config.beacon_interval_ms}));
+                }
             }
         });
 }
@@ -211,7 +219,7 @@ void node::rem_port(const port_ptr_t& port)
             auto t = w.lock();
             if (!t)
             {
-                log(*g_logger, E_LOG_BIT_SHOULD_NOT_HAPPEN, "node[nullptr]::rem_port: Weak pointer expired!");
+                log(*g_logger, E_LOG_BIT_SHOULD_NOT_HAPPEN, "node[nullptr]::rem_port: node weak pointer is expired!");
                 return;
             }
 
@@ -230,7 +238,7 @@ void node::add_static_peer(const sockaddr_t& address)
             auto t = w.lock();
             if (!t)
             {
-                log(*g_logger, E_LOG_BIT_SHOULD_NOT_HAPPEN, "node[nullptr]::add_static_peer: Weak pointer expired!");
+                log(*g_logger, E_LOG_BIT_SHOULD_NOT_HAPPEN, "node[nullptr]::add_static_peer: node weak pointer is expired!");
                 return;
             }
 
@@ -239,7 +247,7 @@ void node::add_static_peer(const sockaddr_t& address)
             {
                 if (port->type == port_s::UNICAST)
                 {
-                    t->add_beacon(std::make_shared<beacon_s>(beacon_s{peer_address_s{port, address}, 500}));
+                    t->add_beacon(std::make_shared<beacon_s>(beacon_s{peer_address_s{port, address}, t->config.beacon_interval_ms}));
                 }
             }
         });
@@ -253,7 +261,7 @@ void node::rem_static_peer(const sockaddr_t& address)
             auto t = w.lock();
             if (!t)
             {
-                log(*g_logger, E_LOG_BIT_SHOULD_NOT_HAPPEN, "node[nullptr]::rem_static_peer: Weak pointer expired!");
+                log(*g_logger, E_LOG_BIT_SHOULD_NOT_HAPPEN, "node[nullptr]::rem_static_peer: node weak pointer is expired!");
                 return;
             }
 
@@ -273,6 +281,7 @@ void node::set_supported_integrity_algorithms(const u8_vec_t& algorithms)
             auto t = w.lock();
             if (!t)
             {
+                log(*g_logger, E_LOG_BIT_SHOULD_NOT_HAPPEN, "node[nullptr]::set_supported_integrity_algorithms: node weak pointer is expired!");
                 return;
             }
 
@@ -288,6 +297,7 @@ void node::set_supported_confidentiality_algorithms(const u8_vec_t& algorithms)
             auto t = w.lock();
             if (!t)
             {
+                log(*g_logger, E_LOG_BIT_SHOULD_NOT_HAPPEN, "node[nullptr]::set_supported_confidentiality_algorithms: node weak pointer is expired!");
                 return;
             }
 
@@ -303,6 +313,7 @@ void node::set_node_config(const node_config_s& config)
             auto t = w.lock();
             if (!t)
             {
+                log(*g_logger, E_LOG_BIT_SHOULD_NOT_HAPPEN, "node[nullptr]::set_node_config: node weak pointer is expired!");
                 return;
             }
 
@@ -365,6 +376,7 @@ void node::on_beacon_timer_expired(const beacon_ptr_t& beacon)
             auto t = w.lock();
             if (!t)
             {
+                log(*g_logger, E_LOG_BIT_SHOULD_NOT_HAPPEN, "node[nullptr]::on_beacon_timer_expired: node weak pointer is expired!");
                 return;
             }
 
@@ -608,7 +620,7 @@ void node::handle_btp_message(const port_ptr_t& port, const sockaddr_t& from, co
     }
 
     const node_id_t peer_node_id = frame.get_src();
-    auto peer = peer_lookup_or_create(peer_node_id, port, from);
+    auto peer = peer_lookup(peer_node_id, port, from);
     if (!peer)
     {
         return;
@@ -766,7 +778,7 @@ void node::handle_btp_message(const port_ptr_t& port, const sockaddr_t& from, co
     }
 
     const node_id_t peer_node_id = frame.get_src();
-    auto peer = peer_lookup_or_create(peer_node_id, port, from);
+    auto peer = peer_lookup(peer_node_id, port, from);
     if (peer)
     {
         peer_update_link_activity(peer, port, from, frame.get_size());
@@ -785,7 +797,7 @@ void node::handle_btp_message(const port_ptr_t& port, const sockaddr_t& from, co
     auto& info_ctx = network_security_procedure_ctx;
 
     const node_id_t peer_node_id = frame.get_src();
-    auto peer = peer_lookup_or_create(peer_node_id, port, from);
+    auto peer = peer_lookup(peer_node_id, port, from);
     if (!peer)
     {
         return;
@@ -823,7 +835,7 @@ void node::handle_btp_message(const port_ptr_t& port, const sockaddr_t& from, co
     }
 
     const node_id_t peer_node_id = frame.get_src();
-    auto peer = peer_lookup_or_create(peer_node_id, port, from);
+    auto peer = peer_lookup(peer_node_id, port, from);
     if (!peer)
     {
         return;
@@ -850,7 +862,7 @@ void node::handle_btp_message(const port_ptr_t& port, const sockaddr_t& from, co
 void node::handle_btp_message(const port_ptr_t& port, const sockaddr_t& from, const frame_const_t& frame, cum::network_keys_response& msg)
 {
     const node_id_t peer_node_id = frame.get_src();
-    auto peer = peer_lookup_or_create(peer_node_id, port, from);
+    auto peer = peer_lookup(peer_node_id, port, from);
     if (!peer || !peer->net_key_acq_proc_ctx)
     {
         log(*g_logger, E_LOG_BIT_INFO, "node[%p]::handle_btp_message(network_keys_response): no acquisition in progress for peer %04x!", this, peer_node_id);
@@ -1042,7 +1054,7 @@ security_ctx_t node::peer_get_sec_ctx(const peer_ptr_t& peer, uint8_t id)
 
 bool node::peer_sec_ctx_is_usable(const security_ctx_s& sec_ctx, uint64_t now) const
 {
-    return !sec_ctx.is_expiring && sec_ctx.expiration_time_s > now + k_sec_ctx_expiring_grace_s;
+    return !sec_ctx.is_expiring && sec_ctx.expiration_time_s > now + config.security_ctx_grace_period_s;
 }
 
 bool node::peer_has_usable_sec_ctx(const peer_ptr_t& peer) const
@@ -1084,31 +1096,24 @@ const security_ctx_s* node::peer_select_sec_ctx(const peer_ptr_t& peer) const
     return fallback;
 }
 
-peer_ptr_t node::peer_lookup_or_create(const node_id_t& node_id, const port_ptr_t& port, const sockaddr_t& from)
+peer_ptr_t node::peer_lookup(const node_id_t& node_id, const port_ptr_t& port, const sockaddr_t& from)
 {
     auto peer_it = peers.find(node_id);
-    if (peers.end() != peer_it)
+    if (peers.end() == peer_it)
     {
-        auto peer = peer_it->second;
-        peer->preferred_peer_address = peer_address_s{port, from};
-        if (!peer->public_key)
-        {
-            auto public_key_it = public_keys.find(node_id);
-            if (public_keys.end() != public_key_it)
-            {
-                peer->public_key = public_key_it->second;
-            }
-        }
-        return peer;
+        return {};
     }
 
-    auto peer = peer_create(node_id);
-    auto public_key_it = public_keys.find(node_id);
-    if (public_keys.end() != public_key_it)
-    {
-        peer->public_key = public_key_it->second;
-    }
+    auto peer = peer_it->second;
     peer->preferred_peer_address = peer_address_s{port, from};
+    if (!peer->public_key)
+    {
+        auto public_key_it = public_keys.find(node_id);
+        if (public_keys.end() != public_key_it)
+        {
+            peer->public_key = public_key_it->second;
+        }
+    }
     return peer;
 }
 
@@ -1185,8 +1190,8 @@ void node::peer_schedule_sec_ctx_renewal_timer(const peer_ptr_t& peer, security_
     sec_ctx.expiration_time_s = expiration_time_s;
     const uint64_t now = now_s();
     const uint64_t remaining_s = expiration_time_s > now ? expiration_time_s - now : 0;
-    const uint64_t wait_s = remaining_s > k_sec_ctx_expiring_grace_s
-        ? remaining_s - k_sec_ctx_expiring_grace_s
+    const uint64_t wait_s = remaining_s > config.security_ctx_grace_period_s
+        ? remaining_s - config.security_ctx_grace_period_s
         : 0;
 
     sec_ctx.timer_id = cv_reactor->get_timer().wait_ms(wait_s * 1000,
@@ -1198,14 +1203,14 @@ void node::peer_schedule_sec_ctx_renewal_timer(const peer_ptr_t& peer, security_
             auto t = w.lock();
             if (!t)
             {
-                log(*g_logger, E_LOG_BIT_ERROR, "node[%p]::peer_schedule_sec_ctx_renewal_timer: Node expired!", t.get());
+                log(*g_logger, E_LOG_BIT_SHOULD_NOT_HAPPEN, "node[nullptr]::peer_schedule_sec_ctx_renewal_timer: node weak pointer is expired!");
                 return;
             }
 
             auto peer = peerw.lock();
             if (!peer)
             {
-                log(*g_logger, E_LOG_BIT_ERROR, "node[%p]::peer_schedule_sec_ctx_renewal_timer: Peer expired!", t.get());
+                log(*g_logger, E_LOG_BIT_SHOULD_NOT_HAPPEN, "node[%p]::peer_schedule_sec_ctx_renewal_timer: peer weak pointer is expired!", t.get());
                 return;
             }
 
@@ -1244,12 +1249,14 @@ void node::peer_mark_sec_ctx_expiring(const peer_ptr_t& peer, uint8_t id, uint64
             auto t = w.lock();
             if (!t)
             {
+                log(*g_logger, E_LOG_BIT_SHOULD_NOT_HAPPEN, "node[nullptr]::peer_mark_sec_ctx_expiring: node weak pointer is expired!");
                 return;
             }
 
             auto peer = peerw.lock();
             if (!peer)
             {
+                log(*g_logger, E_LOG_BIT_SHOULD_NOT_HAPPEN, "node[%p]::peer_mark_sec_ctx_expiring: peer weak pointer is expired!", t.get());
                 return;
             }
 
@@ -1373,7 +1380,7 @@ void node::peer_start_security_procedure(const peer_ptr_t& peer, procedure_compl
             sec_proc_ctx.msg1.sec_ctx     = sec_proc_ctx.id;
             sec_proc_ctx.msg1.dh_key_type = static_cast<uint8_t>(peer->public_key->key_type);
             sec_proc_ctx.dhke.get_own_ephemeral_public(sec_proc_ctx.msg1.ephemeral);
-            sec_proc_ctx.msg1.expiration_time_s = t.now_s() + t.config.peer_security_ctx_timeout_s;
+            sec_proc_ctx.msg1.expiration_time_s = now_s() + t.config.security_ctx_timeout_s;
             sec_proc_ctx.msg1.priority   = random_u64();
 
             uint8_t integrity_algorithm       = 0;
@@ -1414,7 +1421,7 @@ void node::peer_start_security_procedure(const peer_ptr_t& peer, procedure_compl
             sec_proc_ctx.pdu.resize(sec_proc_ctx.frame.get_size());
         }
 
-        sec_proc_ctx.frame.set_ts(t.now_s());
+        sec_proc_ctx.frame.set_ts(now_s());
         sec_proc_ctx.frame.set_sn(peer->tx_sn++);
 
         auto pdu = bfc::sized_buffer(sec_proc_ctx.pdu.size());
@@ -1486,20 +1493,20 @@ void node::peer_process_pending_transactions(const peer_ptr_t& peer)
         peer->current_transaction->do_cb(*this, peer, peer->current_transaction->id);
     }
 
-    peer->transaction_timer_id = cv_reactor->get_timer().wait_ms(config.peer_transaction_timeout_ms,
+    peer->transaction_timer_id = cv_reactor->get_timer().wait_ms(config.transaction_timeout_ms,
         [w = weak_from_this(), peerw = peer_weak_ptr_t(peer)]() -> void
         {
             auto t = w.lock();
             if (!t)
             {
-                log(*g_logger, E_LOG_BIT_ERROR, "node[%p]::peer_process_pending_transactions: Node expired!", t.get());
+                log(*g_logger, E_LOG_BIT_SHOULD_NOT_HAPPEN, "node[nullptr]::peer_process_pending_transactions: node weak pointer is expired!");
                 return;
             }
 
             auto peer = peerw.lock();
             if (!peer)
             {
-                log(*g_logger, E_LOG_BIT_ERROR, "node[%p]::peer_process_pending_transactions: Peer expired!", t.get());
+                log(*g_logger, E_LOG_BIT_SHOULD_NOT_HAPPEN, "node[%p]::peer_process_pending_transactions: peer weak pointer is expired!", t.get());
                 return;
             }
 
@@ -1580,11 +1587,12 @@ void node::peer_expire_security_context(const peer_ptr_t& peer, uint8_t id, uint
 
 void node::peer_schedule_check_activity()
 {
-    check_peer_activity_timer_id = cv_reactor->get_timer().wait_ms(1000*15, [w = weak_from_this()]()
+    check_peer_activity_timer_id = cv_reactor->get_timer().wait_ms(config.check_peer_activity_interval_ms, [w = weak_from_this()]()
     {
         auto t = w.lock();
         if (!t)
         {
+            log(*g_logger, E_LOG_BIT_SHOULD_NOT_HAPPEN, "node[nullptr]::peer_schedule_check_activity: node weak pointer is expired!");
             return;
         }
         t->peer_schedule_check_activity();
@@ -1596,7 +1604,7 @@ void node::peer_schedule_check_activity()
         auto& node_id = peer_.first;
         auto& peer = peer_.second;
 
-        if (now_s() <= peer->last_activity_time_s + 15)
+        if (now_s() <= peer->last_activity_time_s + config.default_peer_timeout_s)
         {
             continue;
         }
@@ -1615,16 +1623,32 @@ void node::peer_cleanup(const peer_ptr_t& peer)
 {
     cv_reactor->get_timer().cancel(peer->transaction_timer_id);
 
-    if (peer->current_transaction)
+    auto current = std::move(peer->current_transaction);
+    peer->current_transaction.reset();
+
+    peer_transactions_t pending = std::move(peer->pending_transactions);
+    peer->pending_transactions.clear();
+
+    if (current && current->done_cb)
     {
-        peer_complete_transaction(peer, peer->current_transaction->id, E_PEER_TRANSACTION_STATUS_PEER_TEARDOWN);
+        current->done_cb(*this, peer, current->id, E_PEER_TRANSACTION_STATUS_PEER_TEARDOWN);
     }
+
+    for (auto& transaction : pending)
+    {
+        if (transaction.done_cb)
+        {
+            transaction.done_cb(*this, peer, transaction.id, E_PEER_TRANSACTION_STATUS_PEER_TEARDOWN);
+        }
+    }
+
+    peer_finish_security_procedure(peer, E_PEER_TRANSACTION_STATUS_PEER_TEARDOWN);
+    peer_finish_network_key_acquisition_procedure(peer, E_PEER_TRANSACTION_STATUS_PEER_TEARDOWN);
 
     for (auto& sec_ctx : peer->security_contexts)
     {
         cv_reactor->get_timer().cancel(sec_ctx.timer_id);
     }
-
     peer->security_contexts.clear();
 
     if (!network_security_procedure_ctx.network_key_candidates.empty() ||
@@ -1641,8 +1665,6 @@ void node::peer_cleanup(const peer_ptr_t& peer)
             network_security_procedure_ctx.ongoing_acquisition_peer.reset();
         }
     }
-
-    peer_finish_network_key_acquisition_procedure(peer, E_PEER_TRANSACTION_STATUS_PEER_TEARDOWN);
 }
 
 void node::reconfigure()
@@ -1652,6 +1674,17 @@ void node::reconfigure()
         network_seed_keys();
     }
     network_schedule_key_refresh();
+
+    for (auto& beacon : beacons)
+    {
+        if (!beacon)
+        {
+            continue;
+        }
+        cv_reactor->get_timer().cancel(beacon->beacon_timer_id);
+        beacon->beacon_interval_ms = config.beacon_interval_ms;
+        on_beacon_timer_expired(beacon);
+    }
 }
 
 bool node::decode_beacon(const frame_const_t& frame) const
@@ -1678,30 +1711,21 @@ bool node::decode_beacon(const frame_const_t& frame) const
     }
 }
 
-bool node::network_has_keys() const
+const network_key_ctx_s* node::get_network_sec_ctx(uint8_t sec_ctx) const
 {
-    const uint64_t now = now_s();
     for (const auto& ctx : network_security_contexts)
     {
-        if (ctx.expiration_time_s > now)
+        if (ctx.sec_ctx == sec_ctx)
         {
-            return true;
+            return &ctx;
         }
     }
-    return false;
+    return nullptr;
 }
 
-bool node::network_has_usable_key(uint8_t sec_ctx) const
+network_key_ctx_s* node::get_network_sec_ctx(uint8_t sec_ctx)
 {
-    const uint64_t now = now_s();
-    for (const auto& ctx : network_security_contexts)
-    {
-        if (ctx.sec_ctx == sec_ctx && ctx.expiration_time_s > now)
-        {
-            return true;
-        }
-    }
-    return false;
+    return const_cast<network_key_ctx_s*>(static_cast<const node*>(this)->get_network_sec_ctx(sec_ctx));
 }
 
 void node::network_seed_keys()
@@ -1720,7 +1744,7 @@ void node::network_seed_keys()
     cum::network_key key;
     key.sec_ctx                   = 1;
     key.priority                  = random_u64();
-    key.expiration_time_s         = now_s() + config.peer_security_ctx_timeout_s;
+    key.expiration_time_s         = now_s() + config.security_ctx_timeout_s;
     key.integrity_algorithm       = supported_integrity_algorithms.front();
     key.confidentiality_algorithm = supported_confidentiality_algorithms.front();
     key.integrity_key             = to_cum_key(random_bytes(integrity_key_size(key.integrity_algorithm)));
@@ -1758,7 +1782,8 @@ void node::network_install_key(const cum::network_key& key)
 
     if (network_security_contexts.end() != ctx_it &&
         !key_preference_is_better(key.priority, key.expiration_time_s,
-                                  ctx_it->priority, ctx_it->expiration_time_s, now_s()))
+                                  ctx_it->priority, ctx_it->expiration_time_s, now_s(),
+                                  config.security_ctx_grace_period_s))
     {
         return;
     }
@@ -1780,6 +1805,8 @@ void node::network_install_key(const cum::network_key& key)
     ctx.confidentiality_algorithm = key.confidentiality_algorithm;
     ctx.integrity_key             = from_cum_key(key.integrity_key);
     ctx.confidentiality_key       = from_cum_key(key.confidentiality_key);
+    ctx.integrity_success         = 0;
+    ctx.integrity_failure         = 0;
 
     const uint64_t ttl_s = std::max(key.expiration_time_s, now_s()) - now_s();
     ctx.expiration_timer_id = cv_reactor->get_timer().wait_ms(ttl_s * 1000,
@@ -1788,6 +1815,7 @@ void node::network_install_key(const cum::network_key& key)
             auto t = w.lock();
             if (!t)
             {
+                log(*g_logger, E_LOG_BIT_SHOULD_NOT_HAPPEN, "node[nullptr]::network_install_key: node weak pointer is expired!");
                 return;
             }
             t->network_expire_key(sec_ctx, creation_id);
@@ -1807,14 +1835,8 @@ void node::network_install_keys(const cum::network_keys& keys)
 cum::network_keys node::network_export_keys() const
 {
     cum::network_keys keys;
-    const uint64_t now = now_s();
     for (const auto& ctx : network_security_contexts)
     {
-        if (ctx.expiration_time_s <= now)
-        {
-            continue;
-        }
-
         cum::network_key key;
         key.sec_ctx                   = ctx.sec_ctx;
         key.priority                  = ctx.priority;
@@ -1831,14 +1853,8 @@ cum::network_keys node::network_export_keys() const
 cum::network_key_informations node::network_export_key_informations() const
 {
     cum::network_key_informations infos;
-    const uint64_t now = now_s();
     for (const auto& ctx : network_security_contexts)
     {
-        if (ctx.expiration_time_s <= now)
-        {
-            continue;
-        }
-
         cum::network_key_information info;
         info.sec_ctx           = ctx.sec_ctx;
         info.priority          = ctx.priority;
@@ -1862,12 +1878,57 @@ void node::network_expire_key(uint8_t sec_ctx, uint64_t creation_id)
 void node::network_acquire_keys()
 {
     if (network_security_procedure_ctx.key_information_collect_timer_id.has_value() ||
+        network_security_procedure_ctx.query_retry_timer_id.has_value() ||
         network_key_acquisition_in_progress())
     {
         return;
     }
 
     network_start_security_query_procedure();
+}
+
+void node::network_cancel_security_query_retry()
+{
+    if (!network_security_procedure_ctx.query_retry_timer_id)
+    {
+        return;
+    }
+
+    cv_reactor->get_timer().cancel(*network_security_procedure_ctx.query_retry_timer_id);
+    network_security_procedure_ctx.query_retry_timer_id.reset();
+}
+
+void node::network_schedule_security_query_retry()
+{
+    network_cancel_security_query_retry();
+
+    network_security_procedure_ctx.query_retry_timer_id = cv_reactor->get_timer().wait_ms(
+        config.query_network_security_retry_timeout_s * 1000,
+        [w = weak_from_this()]()
+        {
+            auto t = w.lock();
+            if (!t)
+            {
+                log(*g_logger, E_LOG_BIT_SHOULD_NOT_HAPPEN, "node[nullptr]::network_schedule_security_query_retry: node weak pointer is expired!");
+                return;
+            }
+
+            if (!t->network_security_procedure_ctx.query_retry_timer_id)
+            {
+                return;
+            }
+
+            t->network_security_procedure_ctx.query_retry_timer_id.reset();
+
+            if (t->peers.empty())
+            {
+                log(*g_logger, E_LOG_BIT_INFO, "node[%p]::network_schedule_security_query_retry: still no peers, rearming!", t.get());
+                t->network_schedule_security_query_retry();
+                return;
+            }
+
+            t->network_start_security_query_procedure();
+        });
 }
 
 void node::network_start_security_query_procedure()
@@ -1877,6 +1938,15 @@ void node::network_start_security_query_procedure()
         return;
     }
 
+    if (peers.empty())
+    {
+        log(*g_logger, E_LOG_BIT_INFO, "node[%p]::network_start_security_query_procedure: no peers yet, deferring query!", this);
+        network_schedule_security_query_retry();
+        return;
+    }
+
+    network_cancel_security_query_retry();
+
     auto& sec_proc = network_security_procedure_ctx;
     sec_proc.network_key_candidates.clear();
     sec_proc.ongoing_acquisition_peer.reset();
@@ -1885,11 +1955,16 @@ void node::network_start_security_query_procedure()
     network_send_public_message(msg);
 
     sec_proc.key_information_collect_timer_id = cv_reactor->get_timer().wait_ms(
-        config.network_security_query_timeout_ms,
+        config.security_query_timeout_ms,
         [w = weak_from_this()]()
         {
             auto t = w.lock();
-            if (!t || !t->network_security_procedure_ctx.key_information_collect_timer_id)
+            if (!t)
+            {
+                log(*g_logger, E_LOG_BIT_SHOULD_NOT_HAPPEN, "node[nullptr]::network_start_security_query_procedure: node weak pointer is expired!");
+                return;
+            }
+            if (!t->network_security_procedure_ctx.key_information_collect_timer_id)
             {
                 return;
             }
@@ -1914,6 +1989,13 @@ void node::network_build_acquisition_candidates()
         });
 }
 
+void node::network_complete_security_procedure()
+{
+    network_cancel_security_query_retry();
+    network_security_procedure_ctx.ongoing_acquisition_peer.reset();
+    network_security_procedure_ctx.network_key_candidates.clear();
+}
+
 void node::network_finish_security_query_procedure()
 {
     cv_reactor->get_timer().cancel(*network_security_procedure_ctx.key_information_collect_timer_id);
@@ -1923,8 +2005,8 @@ void node::network_finish_security_query_procedure()
 
     if (network_security_procedure_ctx.network_key_candidates.empty())
     {
-        network_security_procedure_ctx.ongoing_acquisition_peer.reset();
         log(*g_logger, E_LOG_BIT_INFO, "node[%p]::network_finish_security_query_procedure: no peer with network keys!", this);
+        network_complete_security_procedure();
         return;
     }
 
@@ -1979,8 +2061,8 @@ void node::network_start_next_key_acquisition()
         return;
     }
 
-    sec_proc.ongoing_acquisition_peer.reset();
     log(*g_logger, E_LOG_BIT_INFO, "node[%p]::network_start_next_key_acquisition: no remaining acquisition candidates!", this);
+    network_complete_security_procedure();
 }
 
 void node::network_on_key_acquisition_complete(const peer_ptr_t& peer, int code)
@@ -2001,10 +2083,10 @@ void node::network_on_key_acquisition_complete(const peer_ptr_t& peer, int code)
     }
 
     if (code == E_PEER_TRANSACTION_STATUS_OK &&
-        network_has_keys() &&
+        !network_security_contexts.empty() &&
         sec_proc.network_key_candidates.empty())
     {
-        sec_proc.ongoing_acquisition_peer.reset();
+        network_complete_security_procedure();
         network_schedule_key_refresh();
         return;
     }
@@ -2015,27 +2097,28 @@ void node::network_on_key_acquisition_complete(const peer_ptr_t& peer, int code)
         return;
     }
 
-    sec_proc.ongoing_acquisition_peer.reset();
     log(*g_logger, E_LOG_BIT_INFO,
         "node[%p]::network_on_key_acquisition_complete: acquisition ended for peer %04x (status %s), no candidates left!",
         this, peer ? peer->node_id : 0, to_string(static_cast<peer_transaction_status_e>(code)));
+    network_complete_security_procedure();
 }
 
 void node::network_schedule_key_refresh()
 {
     cv_reactor->get_timer().cancel(network_key_refresh_timer_id);
-    if (!network_has_keys() || config.network_key_refresh_interval_s == 0)
+    if (network_security_contexts.empty() || config.key_refresh_interval_s == 0)
     {
         return;
     }
 
     network_key_refresh_timer_id = cv_reactor->get_timer().wait_ms(
-        config.network_key_refresh_interval_s * 1000,
+        config.key_refresh_interval_s * 1000,
         [w = weak_from_this()]()
         {
             auto t = w.lock();
             if (!t)
             {
+                log(*g_logger, E_LOG_BIT_SHOULD_NOT_HAPPEN, "node[nullptr]::network_schedule_key_refresh: node weak pointer is expired!");
                 return;
             }
             t->network_send_key_refresh();
@@ -2045,7 +2128,7 @@ void node::network_schedule_key_refresh()
 
 void node::network_send_key_refresh()
 {
-    if (!selected_downstream_identity || !network_has_keys())
+    if (!selected_downstream_identity || network_security_contexts.empty())
     {
         return;
     }
@@ -2056,7 +2139,7 @@ void node::network_send_key_refresh()
         return;
     }
 
-    const auto* ctx = network_get_key_ctx(keys.front().sec_ctx);
+    const auto* ctx = get_network_sec_ctx(keys.front().sec_ctx);
     if (!ctx)
     {
         return;
@@ -2065,24 +2148,23 @@ void node::network_send_key_refresh()
     cum::network_key_refresh msg;
     msg.keys = keys;
 
-    for (auto& [node_id, peer] : peers)
+    for (const auto& beacon : beacons)
     {
-        (void)node_id;
-        if (!peer->preferred_peer_address.port)
+        if (!beacon || !beacon->peer.port)
         {
             continue;
         }
 
         bfc::sized_buffer pdu(1024 * 65);
         auto frame = prepare_frame(pdu);
-        frame.set_ttl(1);
+        frame.set_ttl(0);
         frame.set_frame_type(frame_type_e::E_FRAME_TYPE_NETWORK);
         frame.set_sec_ctx(ctx->sec_ctx);
-        frame.set_mac_size_units(0);
+        frame.set_mac_size(integrity_mac_size(ctx->integrity_algorithm));
+        frame.set_sn(0);
         frame.set_src(selected_downstream_identity->node_id);
-        frame.set_dst(peer->node_id);
+        frame.set_dst(0xFFFFFFFF);
         frame.set_ts(now_s());
-        frame.set_sn(peer->tx_sn++);
 
         if (!encode_payload(frame, msg))
         {
@@ -2090,15 +2172,24 @@ void node::network_send_key_refresh()
         }
 
         pdu.resize(frame.get_size());
-        network_try_send_frame(peer->preferred_peer_address.port, peer->preferred_peer_address.address, std::move(pdu), ctx->sec_ctx);
+        if (!protect_frame_mac(frame, ctx->integrity_algorithm, ctx->integrity_key))
+        {
+            log(*g_logger, E_LOG_BIT_ERROR,
+                "node[%p]::network_send_key_refresh: failed to protect refresh for sec_ctx %u!",
+                this, ctx->sec_ctx);
+            continue;
+        }
+
+        network_try_send_frame(beacon->peer.port, beacon->peer.address, std::move(pdu), ctx->sec_ctx);
     }
 }
 
 bool node::network_key_acquisition_in_progress() const
 {
-    if (!network_security_procedure_ctx.ongoing_acquisition_peer.expired() ||
-        (!network_security_procedure_ctx.key_information_collect_timer_id &&
-         !network_security_procedure_ctx.network_key_candidates.empty()))
+    if (network_security_procedure_ctx.query_retry_timer_id.has_value() ||
+        network_security_procedure_ctx.key_information_collect_timer_id.has_value() ||
+        !network_security_procedure_ctx.ongoing_acquisition_peer.expired() ||
+        !network_security_procedure_ctx.network_key_candidates.empty())
     {
         return true;
     }
@@ -2260,10 +2351,6 @@ void node::network_send_security_information(const port_ptr_t& port, const socka
 
     if (all.empty())
     {
-        if (!send_chunk(cum::network_security_information{}))
-        {
-            log(*g_logger, E_LOG_BIT_ERROR, "node[%p]::network_send_security_information: Failed to encode empty response!", this);
-        }
         return;
     }
 
@@ -2362,57 +2449,35 @@ void node::network_send_public_message(const Msg& msg)
     }
 }
 
-const network_key_ctx_s* node::network_get_key_ctx(uint8_t sec_ctx) const
-{
-    const uint64_t now = now_s();
-    const network_key_ctx_s* fallback = nullptr;
-
-    for (const auto& ctx : network_security_contexts)
-    {
-        if (ctx.sec_ctx != sec_ctx || ctx.expiration_time_s <= now)
-        {
-            continue;
-        }
-
-        if (ctx.expiration_time_s > now + k_sec_ctx_expiring_grace_s)
-        {
-            return &ctx;
-        }
-
-        if (!fallback)
-        {
-            fallback = &ctx;
-        }
-    }
-
-    return fallback;
-}
-
 bool node::network_accept_rx(const frame_const_t& frame, bfc::const_buffer_view pdu)
 {
-    const uint8_t sec_ctx = frame.get_sec_ctx();
-
-    if (!network_has_usable_key(sec_ctx))
+    const uint8_t sec_ctx_id = frame.get_sec_ctx();
+    auto* ctx = get_network_sec_ctx(sec_ctx_id);
+    if (!ctx)
     {
-        log(*g_logger, E_LOG_BIT_INFO, "node[%p]::network_accept_rx: unknown network sec_ctx %u, dropping frame!", this, sec_ctx);
+        log(*g_logger, E_LOG_BIT_INFO, "node[%p]::network_accept_rx: unknown network sec_ctx %u, dropping frame!", this, sec_ctx_id);
         network_acquire_keys();
         return false;
     }
 
-    const auto* ctx = network_get_key_ctx(sec_ctx);
-    if (!ctx || !verify_frame_mac(frame, pdu, ctx->integrity_algorithm, ctx->integrity_key))
+    if (!verify_frame_mac(frame, pdu, ctx->integrity_algorithm, ctx->integrity_key))
     {
-        log(*g_logger, E_LOG_BIT_INFO, "node[%p]::network_accept_rx: network MAC verification failed for sec_ctx %u, dropping frame!", this, sec_ctx);
-        network_acquire_keys();
+        ++ctx->integrity_failure;
+        log(*g_logger, E_LOG_BIT_INFO, "node[%p]::network_accept_rx: network MAC verification failed for sec_ctx %u, dropping frame!", this, sec_ctx_id);
+        if (ctx->integrity_success == 0)
+        {
+            network_acquire_keys();
+        }
         return false;
     }
 
+    ++ctx->integrity_success;
     return true;
 }
 
 bool node::network_try_send_frame(const port_ptr_t& port, const sockaddr_t& to, bfc::sized_buffer pdu, uint8_t sec_ctx)
 {
-    if (!network_has_usable_key(sec_ctx))
+    if (!get_network_sec_ctx(sec_ctx))
     {
         log(*g_logger, E_LOG_BIT_INFO, "node[%p]::network_try_send_frame: no network key for sec_ctx %u, dropping frame!", this, sec_ctx);
         network_acquire_keys();
@@ -2421,11 +2486,6 @@ bool node::network_try_send_frame(const port_ptr_t& port, const sockaddr_t& to, 
 
     port->transport->out.push(transport_out_t{transport_data_s{0, to, std::move(pdu)}});
     return true;
-}
-
-uint64_t node::now_s() const
-{
-    return std::chrono::duration_cast<std::chrono::seconds>(std::chrono::steady_clock::now().time_since_epoch()).count();
 }
 
 template<typename Msg>

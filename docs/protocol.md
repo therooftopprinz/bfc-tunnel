@@ -111,6 +111,8 @@ Note Over A,B: Peer Security is now enabled
 
 A node first discovers which peers advertise network security contexts via a public query, then fetches the private keys over an established peer-secure channel.
 
+If no peers exist when acquisition starts, the procedure MUST defer sending `QUERY_NETWORK_SECURITY` and rearm every `node.network.query_network_security_retry_timeout_s` (default 6s) until at least one peer is present. Once peers exist, the node runs one public-query plus private-acquisition cycle and then completes the procedure, even if no keys were installed. A later acquisition trigger (for example an unrecognized NETWORK `sec_ctx` after a missed key refresh) MAY start a new independent procedure.
+
 **Public network security discovery**
 
 ```mermaid
@@ -123,7 +125,7 @@ A -->> B : (PUBLIC) QUERY_NETWORK_SECURITY
 B -->> A : (PUBLIC) NETWORK_SECURITY_INFORMATION
 ```
 
-Every node that receives `QUERY_NETWORK_SECURITY` MUST reply with `NETWORK_SECURITY_INFORMATION`.
+Every node that receives `QUERY_NETWORK_SECURITY` MUST reply with `NETWORK_SECURITY_INFORMATION` when it has at least one network security context to advertise; it MUST NOT send an empty reply.
 `NETWORK_SECURITY_INFORMATION` is advisory metadata only and MUST NOT be used for conflict resolution.
 
 Initial discovery responses select which peer(s) to contact for private key acquisition. The node MAY perform peer network key acquisition from one or more peers.
@@ -147,19 +149,24 @@ B -->> C : (NETWORK, A to C) TUNNEL_DATA
 ```
 
 If peer security is already established, MSG1/MSG2 MAY be skipped before `NETWORK_KEYS_REQUEST`.
+A node that receives `NETWORK_KEYS_REQUEST` MUST reply with `NETWORK_KEYS_RESPONSE` only when it has at least one installed network key; it MUST NOT send a response when it has none.
 
 **Acquisition triggers**
 
 * On startup
 * On NETWORK RX when the security context is unrecognized
-* On NETWORK RX when the context is recognized but integrity verification fails
+* On NETWORK RX when the context is recognized, integrity verification fails, and that context has never successfully verified a frame (`integrity_success == 0`)
 * On NETWORK TX when no usable security context is available
+
+When a recognized context has already verified frames successfully (`integrity_success > 0`), integrity failures are dropped without starting network security acquisition.
 
 ### [Core.Flows.NetworkKeyRefresh] Network Key Refresh
 
 ---
 
-A node periodically (`node.network_key_refresh_interval_s`) advertises its active network keys with `NETWORK_KEY_REFRESH` on NETWORK frames.
+`node.network.key_refresh_interval_s` is a mandatory periodic broadcast: a node with active network keys advertises them with `NETWORK_KEY_REFRESH` as a NETWORK frame with broadcast destination and TTL 0, on configured beacon destinations. The frame is integrity-protected with the selected network `sec_ctx`.
+
+Receivers that already possess that `sec_ctx` verify the frame and may install/update keys via conflict resolution. Nodes missing the context cannot decode NETWORK traffic; they drop the frame and perform network security acquisition. Refresh is maintenance among admitted network members, not establishment for nodes lacking keys.
 
 ```mermaid
 sequenceDiagram
@@ -167,9 +174,9 @@ title Network Key Refresh
 participant A as Alice
 participant B as Bob
 
-Note over A: timer (network_key_refresh_interval_s)
+Note over A: timer (key_refresh_interval_s)
 A -->> B : (NETWORK) NETWORK_KEY_REFRESH
-Note over B: Install/update keys via conflict resolution
+Note over B: Verify MAC with known sec_ctx; install/update via conflict resolution
 ```
 
 **Refresh triggers**
@@ -191,8 +198,8 @@ MSG2 will be sent in accordance with MSG1. Peer security context is indexed by (
 n1 and n2 are node ids for initiator and responser (either of which), where n2 > n1.
 
 Each peer security context carries an absolute `expiration_time_s` set from node config at handshake time.
-At 30 seconds before expiration the context is marked expiring and a new handshake is started so a replacement context can overlap.
-Contexts with more than 30 seconds remaining are preferred; an expiring context is used only when no fresher context is available.
+At `security_ctx_grace_period_s` (default 30s) before expiration the context is marked expiring and a new handshake is started so a replacement context can overlap.
+Contexts with more than `security_ctx_grace_period_s` remaining are preferred; an expiring context is used only when no fresher context is available.
 The expiring context is removed at its expiration time.
 
 In local broadcast transport it is possible to have concurrent MSG1 from n1 and n2,
@@ -259,13 +266,20 @@ title Key Exchange
 Network security protects NETWORK and NETWORK_OVER_PEER frames with a shared security context (`sec_ctx`).
 Each context carries integrity and confidentiality keys, a priority, and an absolute expiration time.
 
+Each local network security context also tracks RX integrity stats:
+* `integrity_success` — successfully verified NETWORK frames
+* `integrity_failure` — frames rejected for MAC failure
+
+Both counters reset when the context is installed or replaced.
+
 **Conflict resolution**
 
 Conflict occurs when multiple candidates exist for the same `sec_ctx` with differing expiration time and/or priority.
 The oldest non-expiring key with the highest priority wins.
-A key is treated as expiring when `expiration_time_s` is less than 30 seconds from the current time.
+A key is treated as expiring when `expiration_time_s` is less than `security_ctx_grace_period_s` (default 30s) from the current time.
 
 Receivers apply conflict resolution when installing keys from `NETWORK_KEYS_RESPONSE` or `NETWORK_KEY_REFRESH`.
+`NETWORK_KEY_REFRESH` is accepted only after NETWORK integrity verification succeeds for a context the receiver already holds.
 
 ## [Core.Messages] Messages
 
@@ -319,8 +333,7 @@ Sent on all transport types to identify active neighboring nodes.
 
 **Query Network Security**
 
-Empty payload. Recipients respond with one or more `network_security_information`
-messages (multiple messages may be used when the informations do not fit the link MTU).
+Empty payload. Recipients with at least one network security context to advertise respond with one or more `network_security_information` messages (multiple messages may be used when the informations do not fit the link MTU). Recipients with nothing to advertise MUST NOT reply.
 
 **Network Security Information**
 

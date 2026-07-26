@@ -36,7 +36,7 @@ void udp_unicast_transport::initialize(const udp_unicast_transport_config_s& con
             auto t = w.lock();
             if (!t)
             {
-                log(*g_logger, E_LOG_BIT_SHOULD_NOT_HAPPEN, "udp_unicast_transport[nullptr]::initialize: Weak pointer expired!");
+                log(*g_logger, E_LOG_BIT_SHOULD_NOT_HAPPEN, "udp_unicast_transport[nullptr]::initialize: udp_unicast_transport weak pointer is expired!");
                 return;
             }
 
@@ -118,7 +118,7 @@ void udp_unicast_transport::initialize(const udp_unicast_transport_config_s& con
                     auto t = w.lock();
                     if (!t)
                     {
-                        log(*g_logger, E_LOG_BIT_SHOULD_NOT_HAPPEN, "udp_unicast_transport[nullptr]::initialize: cv_reactor callback: Weak pointer expired!");
+                        log(*g_logger, E_LOG_BIT_SHOULD_NOT_HAPPEN, "udp_unicast_transport[nullptr]::initialize: cv_reactor callback: udp_unicast_transport weak pointer is expired!");
                         return;
                     }
 
@@ -132,7 +132,7 @@ void udp_unicast_transport::initialize(const udp_unicast_transport_config_s& con
                             }
                             else
                             {
-                                log(*g_logger, E_LOG_BIT_SHOULD_NOT_HAPPEN, "udp_unicast_transport[nullptr]::on_in_queue_ready: Weak pointer expired!");
+                                log(*g_logger, E_LOG_BIT_SHOULD_NOT_HAPPEN, "udp_unicast_transport[nullptr]::on_in_queue_ready: udp_unicast_transport weak pointer is expired!");
                             }
                         }
                     );
@@ -146,7 +146,7 @@ void udp_unicast_transport::initialize(const udp_unicast_transport_config_s& con
                         auto t = w.lock();
                         if (!t)
                         {
-                            log(*g_logger, E_LOG_BIT_SHOULD_NOT_HAPPEN, "udp_unicast_transport[nullptr]::on_recv_ready: Weak pointer expired!");
+                            log(*g_logger, E_LOG_BIT_SHOULD_NOT_HAPPEN, "udp_unicast_transport[nullptr]::on_recv_ready: udp_unicast_transport weak pointer is expired!");
                             return;
                         }
                         t->on_sock_recv_ready();
@@ -170,7 +170,7 @@ void udp_unicast_transport::deinitialize()
                 auto t = w.lock();
                 if (!t)
                 {
-                    log(*g_logger, E_LOG_BIT_SHOULD_NOT_HAPPEN, "udp_unicast_transport[nullptr]::deinitialize: io_reactor callback: Weak pointer expired!");
+                    log(*g_logger, E_LOG_BIT_SHOULD_NOT_HAPPEN, "udp_unicast_transport[nullptr]::deinitialize: io_reactor callback: udp_unicast_transport weak pointer is expired!");
                     done.set_value();
                     return;
                 }
@@ -194,6 +194,10 @@ void udp_unicast_transport::deinitialize()
                         {
                             t->cv_reactor->remove_read_rdy(t->transport_queue_pair->in);
                         }
+                        else
+                        {
+                            log(*g_logger, E_LOG_BIT_SHOULD_NOT_HAPPEN, "udp_unicast_transport[nullptr]::deinitialize: cv_reactor remove_read_rdy: udp_unicast_transport weak pointer is expired!");
+                        }
                     }
                 );
 
@@ -211,6 +215,10 @@ void udp_unicast_transport::deinitialize()
                                 t->deinitialize_promise->set_value();
                                 t->deinitialize_promise.reset();
                             }
+                        }
+                        else
+                        {
+                            log(*g_logger, E_LOG_BIT_SHOULD_NOT_HAPPEN, "udp_unicast_transport[nullptr]::deinitialize: rem_read_rdy: udp_unicast_transport weak pointer is expired!");
                         }
                     });
             }

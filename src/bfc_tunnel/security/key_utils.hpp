@@ -19,7 +19,9 @@ struct network_derived_keys_s
 key_t sign(dh_key_type_e key_type, const key_t& private_key, bfc::const_buffer_view message);
 bool verify(dh_key_type_e key_type, const key_t& public_key, bfc::const_buffer_view message, const key_t& signature);
 network_derived_keys_s derive_network_keys(const key_t& base, uint8_t integrity_algorithm, uint8_t confidentiality_algorithm);
+key_t compute_integrity_mac(uint8_t integrity_algorithm, const key_t& key, bfc::const_buffer_view data);
 bool verify_integrity_mac(uint8_t integrity_algorithm, const key_t& key, bfc::const_buffer_view data, bfc::const_buffer_view mac);
+bool protect_frame_mac(frame_t& frame, uint8_t integrity_algorithm, const key_t& integrity_key);
 bool verify_frame_mac(const frame_const_t& frame, bfc::const_buffer_view pdu, uint8_t integrity_algorithm, const key_t& integrity_key);
 
 } // namespace bfc_tunnel

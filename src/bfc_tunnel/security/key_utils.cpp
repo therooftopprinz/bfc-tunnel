@@ -83,22 +83,22 @@ network_derived_keys_s derive_network_keys(const key_t& base, uint8_t integrity_
     };
 }
 
-bool verify_integrity_mac(uint8_t integrity_algorithm, const key_t& key, bfc::const_buffer_view data, bfc::const_buffer_view mac)
+key_t compute_integrity_mac(uint8_t integrity_algorithm, const key_t& key, bfc::const_buffer_view data)
 {
     if (integrity_algorithm == E_EA_NONE)
     {
-        return mac.empty();
+        return {};
     }
 
-    if (key.empty() || mac.empty())
+    if (key.empty())
     {
-        return false;
+        return {};
     }
 
     const size_t expected_size = integrity_mac_size(integrity_algorithm);
-    if (mac.size() != expected_size)
+    if (expected_size == 0)
     {
-        return false;
+        return {};
     }
 
     key_t computed;
@@ -110,47 +110,114 @@ bool verify_integrity_mac(uint8_t integrity_algorithm, const key_t& key, bfc::co
         case E_EA_HMAC_SHA2_512:
         case E_EA_HMAC_BLAKE3:
         default:
-            return false;
+            return {};
     }
 
     if (computed.size() < expected_size)
     {
-        return false;
+        return {};
     }
 
     computed.resize(expected_size);
-    if (mac.size() != computed.size())
+    return computed;
+}
+
+bool verify_integrity_mac(uint8_t integrity_algorithm, const key_t& key, bfc::const_buffer_view data, bfc::const_buffer_view mac)
+{
+    if (integrity_algorithm == E_EA_NONE)
+    {
+        return mac.empty();
+    }
+
+    if (mac.empty())
+    {
+        return false;
+    }
+
+    const key_t computed = compute_integrity_mac(integrity_algorithm, key, data);
+    if (computed.empty() || mac.size() != computed.size())
     {
         return false;
     }
     return std::memcmp(computed.data(), mac.data(), computed.size()) == 0;
 }
 
-bool verify_frame_mac(const frame_const_t& frame, bfc::const_buffer_view pdu, uint8_t integrity_algorithm, const key_t& integrity_key)
+namespace
+{
+
+std::vector<std::byte> frame_authenticated_bytes(const frame_const_t& frame, bfc::const_buffer_view pdu)
 {
     const size_t mac_size = frame.get_mac_size();
     const size_t mac_offset = frame_const_t::k_fixed_prefix_size;
-
-    if (mac_size == 0)
-    {
-        return integrity_algorithm == E_EA_NONE;
-    }
-
     if (pdu.size() < mac_offset + mac_size)
     {
-        return false;
+        return {};
     }
 
     std::vector<std::byte> authenticated;
     authenticated.reserve(pdu.size() - mac_size);
     authenticated.insert(authenticated.end(), pdu.data(), pdu.data() + mac_offset);
     authenticated.insert(authenticated.end(), pdu.data() + mac_offset + mac_size, pdu.data() + pdu.size());
+    return authenticated;
+}
+
+} // namespace
+
+bool protect_frame_mac(frame_t& frame, uint8_t integrity_algorithm, const key_t& integrity_key)
+{
+    const size_t mac_size = frame.get_mac_size();
+    const size_t expected_size = integrity_mac_size(integrity_algorithm);
+    if (mac_size != expected_size)
+    {
+        return false;
+    }
+
+    if (mac_size == 0)
+    {
+        return integrity_algorithm == E_EA_NONE;
+    }
+
+    const frame_const_t cframe(frame.get_base(), frame.get_size());
+    const bfc::const_buffer_view pdu(frame.get_base(), frame.get_size());
+    const auto authenticated = frame_authenticated_bytes(cframe, pdu);
+    if (authenticated.size() != pdu.size() - mac_size)
+    {
+        return false;
+    }
+
+    const key_t mac = compute_integrity_mac(
+        integrity_algorithm,
+        integrity_key,
+        bfc::const_buffer_view(authenticated.data(), authenticated.size()));
+    if (mac.size() != mac_size)
+    {
+        return false;
+    }
+
+    std::memcpy(frame.get_mac(), mac.data(), mac_size);
+    return true;
+}
+
+bool verify_frame_mac(const frame_const_t& frame, bfc::const_buffer_view pdu, uint8_t integrity_algorithm, const key_t& integrity_key)
+{
+    const size_t mac_size = frame.get_mac_size();
+
+    if (mac_size == 0)
+    {
+        return integrity_algorithm == E_EA_NONE;
+    }
+
+    const auto authenticated = frame_authenticated_bytes(frame, pdu);
+    if (authenticated.empty())
+    {
+        return false;
+    }
 
     return verify_integrity_mac(
         integrity_algorithm,
         integrity_key,
         bfc::const_buffer_view(authenticated.data(), authenticated.size()),
-        bfc::const_buffer_view(pdu.data() + mac_offset, mac_size));
+        bfc::const_buffer_view(pdu.data() + frame_const_t::k_fixed_prefix_size, mac_size));
 }
 
 key_t sign_x25519(const key_t& private_key, bfc::const_buffer_view message)

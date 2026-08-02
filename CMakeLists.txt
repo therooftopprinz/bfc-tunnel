@@ -142,10 +142,15 @@ target_compile_options(bfc_tunnel_security PRIVATE ${BFC_TUNNEL_COMPILE_WARNINGS
 add_library(bfc_tunnel STATIC
   src/bfc_tunnel/transport/transport_types.cpp
   src/bfc_tunnel/transport/udp_unicast_transport.cpp
+  src/bfc_tunnel/transport/udp_internal_multicast_transport.cpp
+  src/bfc_tunnel/transport/udp_external_multicast_transport.cpp
   src/bfc_tunnel/utils/logger.cpp
   src/bfc_tunnel/utils/msg_utils.cpp
   src/bfc_tunnel/node.cpp
   src/bfc_tunnel/route_manager.cpp
+  src/bfc_tunnel/node_runtime.cpp
+  src/bfc_tunnel/console/console_server.cpp
+  src/bfc_tunnel/console/console_commands.cpp
 )
 add_dependencies(bfc_tunnel generate_btprotocol)
 target_sources(bfc_tunnel PRIVATE "${BTPROTOCOL_OUTPUT}")
@@ -156,6 +161,13 @@ target_include_directories(bfc_tunnel PUBLIC
 target_link_libraries(bfc_tunnel PUBLIC bfc_headers bfc_tunnel_security botan::botan-static)
 
 target_compile_options(bfc_tunnel PRIVATE ${BFC_TUNNEL_COMPILE_WARNINGS})
+
+add_executable(bfc_tunnel_app
+  src/bfc_tunnel/app/main.cpp
+)
+set_target_properties(bfc_tunnel_app PROPERTIES OUTPUT_NAME bfc_tunnel)
+target_link_libraries(bfc_tunnel_app PRIVATE bfc_tunnel)
+target_compile_options(bfc_tunnel_app PRIVATE ${BFC_TUNNEL_COMPILE_WARNINGS})
 
 enable_testing()
 
@@ -172,6 +184,7 @@ add_executable(bfc_tunnel_tests
   src/tests/frame_tests.cpp
   src/tests/msg1_tests.cpp
   src/tests/network_key_tests.cpp
+  src/tests/console_tests.cpp
   src/tests/gtestmain.cpp
 )
 target_link_libraries(bfc_tunnel_tests PRIVATE GTest::gtest bfc_tunnel botan::botan-static)

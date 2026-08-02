@@ -262,7 +262,8 @@ struct downstream_identity_s
     node_id_t node_id;
     key_t     private_key;
 
-    sockaddr_t downstream_address;
+    sockaddr_t downstream_address; // ds_send
+    sockaddr_t ds_recv_address;
     transport_queue_pair_ptr_t transport;
 };
 
@@ -321,14 +322,37 @@ public:
     void add_static_peer             (const sockaddr_t& address);
     void rem_static_peer             (const sockaddr_t& address);
     void add_downstream_identity     (const downstream_identity_ptr_t& identity);
-    void rem_downstream_identity     (const downstream_identity_ptr_t& identity);
+    void rem_downstream_identity     (node_id_t node_id);
+    bool select_downstream_identity  (node_id_t node_id);
+
+    void add_private_key             (node_id_t node_id, key_t private_key);
+    void rem_private_key             (node_id_t node_id);
+    void add_public_key              (node_id_t node_id, peer_public_key_s key);
+    void rem_public_key              (node_id_t node_id);
 
     void set_supported_integrity_algorithms(const u8_vec_t& algorithms);
     void set_supported_confidentiality_algorithms(const u8_vec_t& algorithms);
+    void set_supported_dhke_key_types(const std::vector<dh_key_type_e>& key_types);
 
     void set_node_config(const node_config_s& config);
 
+    const node_config_s& get_node_config() const { return config; }
+    const u8_vec_t& get_supported_integrity_algorithms() const { return supported_integrity_algorithms; }
+    const u8_vec_t& get_supported_confidentiality_algorithms() const { return supported_confidentiality_algorithms; }
+    const std::vector<dh_key_type_e>& get_supported_dhke_key_types() const { return supported_dhke_key_types; }
+    const public_keys_t& get_public_keys() const { return public_keys; }
+    const std::unordered_map<node_id_t, key_t>& get_private_keys() const { return private_keys; }
+    const downstream_identities_t& get_downstream_identities() const { return downstream_identities; }
+    const downstream_identity_ptr_t& get_selected_downstream_identity() const { return selected_downstream_identity; }
+    const sockaddrs_t& get_static_peers() const { return static_peers; }
+    const ports_t& get_ports() const { return ports; }
+    const peer_by_node_id_map& get_peers() const { return peers; }
+    bool get_is_initialized() const { return is_initialized; }
+
 private:
+    void ensure_initialized_unlocked();
+    void peer_record_tx(const peer_ptr_t& peer, const port_ptr_t& port, const sockaddr_t& to, size_t size);
+
     void add_beacon(beacon_ptr_t beacon);
     void rem_beacon(const port_ptr_t&);
     void rem_beacon(const sockaddr_t&);
@@ -433,6 +457,8 @@ private:
     uint32_t                         network_tx_sn = 0;
     u8_vec_t                         supported_integrity_algorithms;
     u8_vec_t                         supported_confidentiality_algorithms;
+    std::vector<dh_key_type_e>       supported_dhke_key_types;
+    std::unordered_map<node_id_t, key_t> private_keys;
 
     // maintenance tasks
     timer_id_t                       check_peer_activity_timer_id;

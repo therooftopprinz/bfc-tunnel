@@ -1,0 +1,389 @@
+#include <bfc_tunnel/transport/transport_types.hpp>
+
+#include <bfc/socket.hpp>
+#include <bfc/sized_buffer.hpp>
+#include <bfc_tunnel/transport/udp_external_multicast_transport.hpp>
+#include <bfc_tunnel/utils/logger.hpp>
+#include <bfc_tunnel/utils/reactor_helper.hpp>
+#include <bfc_tunnel/utils/string_utils.hpp>
+
+#include <cerrno>
+#include <cstring>
+#include <fcntl.h>
+#include <future>
+#include <numeric>
+#include <unistd.h>
+
+namespace bfc_tunnel
+{
+
+namespace
+{
+
+std::optional<std::pair<std::string, uint16_t>> split_ip_and_port(const std::string& address)
+{
+    auto pos = address.find_last_of(':');
+    if (pos == std::string::npos)
+    {
+        return std::make_pair(address, uint16_t{0});
+    }
+
+    auto port = utils::str_as<uint16_t>(address.substr(pos + 1));
+    if (!port)
+    {
+        return std::nullopt;
+    }
+
+    return std::make_pair(address.substr(0, pos), *port);
+}
+
+bool looks_like_v6(const std::string& address)
+{
+    return std::accumulate(address.begin(), address.end(), 0, [](int acc, char c) { return acc + (c == ':'); }) > 1;
+}
+
+} // namespace
+
+udp_external_multicast_transport::udp_external_multicast_transport(
+    io_reactor_ptr_t io_reactor,
+    cv_reactor_ptr_t cv_reactor,
+    transport_queue_pair_ptr_t transport_queue_pair)
+    : io_reactor(io_reactor)
+    , cv_reactor(cv_reactor)
+    , transport_queue_pair(transport_queue_pair)
+{}
+
+udp_external_multicast_transport::~udp_external_multicast_transport()
+{
+    deinitialize();
+}
+
+void udp_external_multicast_transport::initialize(const udp_external_multicast_transport_config_s& config)
+{
+    utils::dispatch_sync(*io_reactor,
+        [config, w = weak_from_this()]()
+        {
+            auto t = w.lock();
+            if (!t)
+            {
+                log(*g_logger, E_LOG_BIT_SHOULD_NOT_HAPPEN, "udp_external_multicast_transport[nullptr]::initialize: udp_external_multicast_transport weak pointer is expired!");
+                return;
+            }
+
+            if (E_TRANSPORT_STATE_UNINITIALIZED != t->state)
+            {
+                log(*g_logger, E_LOG_BIT_ERROR, "udp_external_multicast_transport[%p]::initialize: Transport already initialized!", t.get());
+                return;
+            }
+
+            auto recv_parsed = split_ip_and_port(config.recv);
+            if (!recv_parsed)
+            {
+                log(*g_logger, E_LOG_BIT_ERROR, "udp_external_multicast_transport[%p]::initialize: Invalid recv address! recv=%s",
+                    t.get(), config.recv.c_str());
+                return;
+            }
+
+            auto send_parsed = split_ip_and_port(config.send);
+            if (!send_parsed)
+            {
+                log(*g_logger, E_LOG_BIT_ERROR, "udp_external_multicast_transport[%p]::initialize: Invalid send address! send=%s",
+                    t.get(), config.send.c_str());
+                return;
+            }
+
+            t->is_v6 = looks_like_v6(config.recv);
+
+            if (t->is_v6)
+            {
+                t->sock = bfc::create_udp6();
+            }
+            else
+            {
+                t->sock = bfc::create_udp4();
+            }
+
+            if (0 > t->sock.fd())
+            {
+                log(*g_logger, E_LOG_BIT_ERROR, "udp_external_multicast_transport[%p]::initialize: Failed to create socket! error=%d(%s)", t.get(), errno, strerror(errno));
+                return;
+            }
+
+            const auto& [recv_ip, recv_port] = *recv_parsed;
+            const auto& [send_ip, send_port] = *send_parsed;
+
+            if (t->is_v6)
+            {
+                auto bind_addr = bfc::ip6_port_to_sockaddr(recv_ip, recv_port);
+                if (AF_INET6 != bind_addr.sin6_family)
+                {
+                    log(*g_logger, E_LOG_BIT_ERROR, "udp_external_multicast_transport[%p]::initialize: Invalid recv address! recv=%s",
+                        t.get(), config.recv.c_str());
+                    t->sock = {};
+                    return;
+                }
+
+                if (0 > t->sock.bind(bind_addr))
+                {
+                    log(*g_logger, E_LOG_BIT_ERROR, "udp_external_multicast_transport[%p]::initialize: Failed to bind6 socket! error=%d(%s)",
+                        t.get(), errno, strerror(errno));
+                    t->sock = {};
+                    return;
+                }
+
+                auto send_addr = bfc::ip6_port_to_sockaddr(send_ip, send_port);
+                if (AF_INET6 != send_addr.sin6_family)
+                {
+                    log(*g_logger, E_LOG_BIT_ERROR, "udp_external_multicast_transport[%p]::initialize: Invalid send address! send=%s",
+                        t.get(), config.send.c_str());
+                    t->sock = {};
+                    return;
+                }
+
+                t->send_address = send_addr;
+            }
+            else
+            {
+                auto bind_addr = bfc::ip4_port_to_sockaddr(recv_ip, recv_port);
+                if (AF_INET != bind_addr.sin_family)
+                {
+                    log(*g_logger, E_LOG_BIT_ERROR, "udp_external_multicast_transport[%p]::initialize: Invalid recv address! recv=%s",
+                        t.get(), config.recv.c_str());
+                    t->sock = {};
+                    return;
+                }
+
+                if (0 > t->sock.bind(bind_addr))
+                {
+                    log(*g_logger, E_LOG_BIT_ERROR, "udp_external_multicast_transport[%p]::initialize: Failed to bind4 socket! error=%d(%s)",
+                        t.get(), errno, strerror(errno));
+                    t->sock = {};
+                    return;
+                }
+
+                auto send_addr = bfc::ip4_port_to_sockaddr(send_ip, send_port);
+                if (AF_INET != send_addr.sin_family)
+                {
+                    log(*g_logger, E_LOG_BIT_ERROR, "udp_external_multicast_transport[%p]::initialize: Invalid send address! send=%s",
+                        t.get(), config.send.c_str());
+                    t->sock = {};
+                    return;
+                }
+
+                t->send_address = send_addr;
+            }
+
+            const int flags = fcntl(t->sock.fd(), F_GETFL, 0);
+            if (0 > flags || 0 > fcntl(t->sock.fd(), F_SETFL, flags | O_NONBLOCK))
+            {
+                log(*g_logger, E_LOG_BIT_ERROR, "udp_external_multicast_transport[%p]::initialize: Failed to set O_NONBLOCK! error=%d(%s)",
+                    t.get(), errno, strerror(errno));
+                t->sock = {};
+                t->send_address = sockaddr_none{};
+                return;
+            }
+
+            utils::dispatch_sync(*t->cv_reactor,
+                [w]()
+                {
+                    auto t = w.lock();
+                    if (!t)
+                    {
+                        log(*g_logger, E_LOG_BIT_SHOULD_NOT_HAPPEN, "udp_external_multicast_transport[nullptr]::initialize: cv_reactor callback: udp_external_multicast_transport weak pointer is expired!");
+                        return;
+                    }
+
+                    t->cv_reactor->add_read_rdy(
+                        t->transport_queue_pair->in,
+                        [w]()
+                        {
+                            if (auto t = w.lock())
+                            {
+                                t->on_in_queue_ready();
+                            }
+                            else
+                            {
+                                log(*g_logger, E_LOG_BIT_SHOULD_NOT_HAPPEN, "udp_external_multicast_transport[nullptr]::on_in_queue_ready: udp_external_multicast_transport weak pointer is expired!");
+                            }
+                        }
+                    );
+                }
+            );
+
+            t->io_reactor->add_read_rdy(
+                    t->sock.fd(),
+                    [w]()
+                    {
+                        auto t = w.lock();
+                        if (!t)
+                        {
+                            log(*g_logger, E_LOG_BIT_SHOULD_NOT_HAPPEN, "udp_external_multicast_transport[nullptr]::on_recv_ready: udp_external_multicast_transport weak pointer is expired!");
+                            return;
+                        }
+                        t->on_sock_recv_ready();
+                    }
+                );
+
+            t->config = config;
+            t->state = E_TRANSPORT_STATE_INITIALIZED;
+        }
+    );
+}
+
+void udp_external_multicast_transport::deinitialize()
+{
+    deinitialize_promise.emplace();
+    std::promise<void>& done = deinitialize_promise.value();
+
+    utils::dispatch_sync(*io_reactor,
+            [w = weak_from_this(), &done]()
+            {
+                auto t = w.lock();
+                if (!t)
+                {
+                    log(*g_logger, E_LOG_BIT_SHOULD_NOT_HAPPEN, "udp_external_multicast_transport[nullptr]::deinitialize: io_reactor callback: udp_external_multicast_transport weak pointer is expired!");
+                    done.set_value();
+                    return;
+                }
+
+                if (E_TRANSPORT_STATE_UNINITIALIZED == t->state.load())
+                {
+                    log(*g_logger, E_LOG_BIT_ERROR, "udp_external_multicast_transport[%p]::deinitialize: Transport already uninitialized!", t.get());
+                    done.set_value();
+                    t->deinitialize_promise.reset();
+                    return;
+                }
+
+                const int sock_fd = t->sock.fd();
+
+                t->state.store(E_TRANSPORT_STATE_UNINITIALIZED);
+
+                utils::dispatch_sync(*t->cv_reactor,
+                    [w]()
+                    {
+                        if (auto t = w.lock())
+                        {
+                            t->cv_reactor->remove_read_rdy(t->transport_queue_pair->in);
+                        }
+                        else
+                        {
+                            log(*g_logger, E_LOG_BIT_SHOULD_NOT_HAPPEN, "udp_external_multicast_transport[nullptr]::deinitialize: cv_reactor remove_read_rdy: udp_external_multicast_transport weak pointer is expired!");
+                        }
+                    }
+                );
+
+                t->io_reactor->rem_read_rdy(
+                    sock_fd,
+                    [w]()
+                    {
+                        if (auto t = w.lock())
+                        {
+                            t->sock = bfc::socket();
+                            t->config = {};
+                            t->send_address = sockaddr_none{};
+
+                            if (t->deinitialize_promise)
+                            {
+                                t->deinitialize_promise->set_value();
+                                t->deinitialize_promise.reset();
+                            }
+                        }
+                        else
+                        {
+                            log(*g_logger, E_LOG_BIT_SHOULD_NOT_HAPPEN, "udp_external_multicast_transport[nullptr]::deinitialize: rem_read_rdy: udp_external_multicast_transport weak pointer is expired!");
+                        }
+                    });
+            }
+        );
+
+    deinitialize_promise->get_future().wait();
+    deinitialize_promise.reset();
+}
+
+void udp_external_multicast_transport::on_in_queue_ready()
+{
+    auto ins = transport_queue_pair->in.pop();
+    if (ins.empty())
+    {
+        return;
+    }
+
+    for (auto& in : ins)
+    {
+        handle(in);
+    }
+}
+
+void udp_external_multicast_transport::handle(const transport_data_s& data)
+{
+    if (state.load() != E_TRANSPORT_STATE_INITIALIZED)
+    {
+        log(*g_logger, E_LOG_BIT_ERROR, "udp_external_multicast_transport[%p]::handle: Transport not initialized!", this);
+        transport_queue_pair->out.push(transport_delivery_failure{data.id, data.address, EBADF});
+        return;
+    }
+
+    // The destination in `data.address` is ignored: every datagram is
+    // injected into the external multicaster via the configured `send`
+    // address regardless of the intended peer.
+    auto send_error = std::visit(
+        [this, &data](const auto& addr) -> std::optional<int>
+        {
+            using addr_t = std::decay_t<decltype(addr)>;
+            if constexpr (std::is_same_v<addr_t, sockaddr_none>)
+            {
+                return EINVAL;
+            }
+            else if (0 > sock.send(data.data, 0, (sockaddr*)&addr, sizeof(addr)))
+            {
+                return errno;
+            }
+            return std::nullopt;
+        },
+        send_address
+    );
+
+    if (send_error)
+    {
+        log(*g_logger, E_LOG_BIT_ERROR, "udp_external_multicast_transport[%p]::handle: Failed to send data! error=%d(%s)", this, *send_error, strerror(*send_error));
+        transport_queue_pair->out.push(transport_delivery_failure{data.id, data.address, *send_error});
+    }
+}
+
+void udp_external_multicast_transport::on_sock_recv_ready()
+{
+    // todo: use buffer pool
+    constexpr size_t MAX_PDU_SIZE = 1024 * 64;
+
+    while (state.load() == E_TRANSPORT_STATE_INITIALIZED)
+    {
+        sockaddr_storage addr;
+        socklen_t addr_len = sizeof(addr);
+        bfc::sized_buffer pdu(MAX_PDU_SIZE);
+
+        auto n = sock.recv(pdu, 0, (sockaddr*)&addr, &addr_len);
+        if (n > 0)
+        {
+            pdu.resize(static_cast<size_t>(n));
+            if (is_v6)
+            {
+                transport_queue_pair->out.push(transport_data_s{0, *(sockaddr_in6*)&addr, std::move(pdu)});
+            }
+            else
+            {
+                transport_queue_pair->out.push(transport_data_s{0, *(sockaddr_in*)&addr, std::move(pdu)});
+            }
+            continue;
+        }
+
+        if (0 == n || EAGAIN == errno || EWOULDBLOCK == errno)
+        {
+            break;
+        }
+
+        log(*g_logger, E_LOG_BIT_ERROR, "udp_external_multicast_transport[%p]::on_sock_recv_ready: Failed to recv data! error=%d(%s)", this, errno, strerror(errno));
+        break;
+    }
+}
+
+} // namespace bfc_tunnel

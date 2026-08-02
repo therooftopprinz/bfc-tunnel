@@ -122,7 +122,7 @@ void node::uninitialize()
 
             for (auto& port : t->ports)
             {
-                t->cv_reactor->remove_read_rdy(port->transport->in);
+                t->cv_reactor->remove_read_rdy(port->transport->out);
             }
             
             for (auto& beacon : t->beacons)
@@ -173,8 +173,7 @@ void node::add_port(const port_ptr_t& port)
 
             if (!t->is_initialized)
             {
-                log(*g_logger, E_LOG_BIT_ERROR, "node[%p]::add_port: Node is not initialized!", t.get());
-                return;
+                t->ensure_initialized_unlocked();
             }
         
             if (!port)
@@ -184,7 +183,7 @@ void node::add_port(const port_ptr_t& port)
             }
 
             t->ports.emplace_back(port);
-            t->cv_reactor->add_read_rdy(port->transport->in, [w, port]()
+            t->cv_reactor->add_read_rdy(port->transport->out, [w, port]()
                     {
                         auto t = w.lock();
                         if (!t)
@@ -223,7 +222,7 @@ void node::rem_port(const port_ptr_t& port)
                 return;
             }
 
-            t->cv_reactor->remove_read_rdy(port->transport->in);
+            t->cv_reactor->remove_read_rdy(port->transport->out);
             t->ports.erase(std::remove(t->ports.begin(), t->ports.end(), port), t->ports.end());
             t->rem_beacon(port);
 
@@ -326,6 +325,212 @@ void node::set_node_config(const node_config_s& config)
         });
 }
 
+void node::ensure_initialized_unlocked()
+{
+    if (is_initialized)
+    {
+        return;
+    }
+    is_initialized = true;
+    if (config.network_key_seeder)
+    {
+        network_seed_keys();
+    }
+    network_acquire_keys();
+    network_schedule_key_refresh();
+    peer_schedule_check_activity();
+}
+
+void node::add_downstream_identity(const downstream_identity_ptr_t& identity)
+{
+    utils::dispatch_sync(*cv_reactor,
+        [w = weak_from_this(), identity]()
+        {
+            auto t = w.lock();
+            if (!t || !identity)
+            {
+                return;
+            }
+            t->ensure_initialized_unlocked();
+
+            auto it = std::find_if(t->downstream_identities.begin(), t->downstream_identities.end(),
+                [&](const downstream_identity_ptr_t& id) { return id && id->node_id == identity->node_id; });
+            if (it != t->downstream_identities.end())
+            {
+                *it = identity;
+            }
+            else
+            {
+                t->downstream_identities.push_back(identity);
+            }
+
+            auto pk_it = t->private_keys.find(identity->node_id);
+            if (pk_it != t->private_keys.end())
+            {
+                identity->private_key = pk_it->second;
+            }
+
+            if (!t->selected_downstream_identity)
+            {
+                t->selected_downstream_identity = identity;
+            }
+            else if (t->selected_downstream_identity->node_id == identity->node_id)
+            {
+                t->selected_downstream_identity = identity;
+            }
+        });
+}
+
+void node::rem_downstream_identity(node_id_t node_id)
+{
+    utils::dispatch_sync(*cv_reactor,
+        [w = weak_from_this(), node_id]()
+        {
+            auto t = w.lock();
+            if (!t)
+            {
+                return;
+            }
+            t->downstream_identities.erase(
+                std::remove_if(t->downstream_identities.begin(), t->downstream_identities.end(),
+                    [node_id](const downstream_identity_ptr_t& id) { return id && id->node_id == node_id; }),
+                t->downstream_identities.end());
+            if (t->selected_downstream_identity && t->selected_downstream_identity->node_id == node_id)
+            {
+                t->selected_downstream_identity =
+                    t->downstream_identities.empty() ? nullptr : t->downstream_identities.front();
+            }
+        });
+}
+
+bool node::select_downstream_identity(node_id_t node_id)
+{
+    bool ok = false;
+    utils::dispatch_sync(*cv_reactor,
+        [w = weak_from_this(), node_id, &ok]()
+        {
+            auto t = w.lock();
+            if (!t)
+            {
+                return;
+            }
+            for (auto& id : t->downstream_identities)
+            {
+                if (id && id->node_id == node_id)
+                {
+                    t->selected_downstream_identity = id;
+                    ok = true;
+                    return;
+                }
+            }
+        });
+    return ok;
+}
+
+void node::add_private_key(node_id_t node_id, key_t private_key)
+{
+    utils::dispatch_sync(*cv_reactor,
+        [w = weak_from_this(), node_id, private_key = std::move(private_key)]() mutable
+        {
+            auto t = w.lock();
+            if (!t)
+            {
+                return;
+            }
+            t->private_keys[node_id] = std::move(private_key);
+            for (auto& id : t->downstream_identities)
+            {
+                if (id && id->node_id == node_id)
+                {
+                    id->private_key = t->private_keys[node_id];
+                }
+            }
+        });
+}
+
+void node::rem_private_key(node_id_t node_id)
+{
+    utils::dispatch_sync(*cv_reactor,
+        [w = weak_from_this(), node_id]()
+        {
+            auto t = w.lock();
+            if (!t)
+            {
+                return;
+            }
+            t->private_keys.erase(node_id);
+        });
+}
+
+void node::add_public_key(node_id_t node_id, peer_public_key_s key)
+{
+    utils::dispatch_sync(*cv_reactor,
+        [w = weak_from_this(), node_id, key = std::move(key)]() mutable
+        {
+            auto t = w.lock();
+            if (!t)
+            {
+                return;
+            }
+            t->public_keys[node_id] = std::move(key);
+            auto peer_it = t->peers.find(node_id);
+            if (peer_it != t->peers.end())
+            {
+                peer_it->second->public_key = t->public_keys[node_id];
+            }
+        });
+}
+
+void node::rem_public_key(node_id_t node_id)
+{
+    utils::dispatch_sync(*cv_reactor,
+        [w = weak_from_this(), node_id]()
+        {
+            auto t = w.lock();
+            if (!t)
+            {
+                return;
+            }
+            t->public_keys.erase(node_id);
+        });
+}
+
+void node::set_supported_dhke_key_types(const std::vector<dh_key_type_e>& key_types)
+{
+    utils::dispatch_sync(*cv_reactor,
+        [w = weak_from_this(), key_types]()
+        {
+            auto t = w.lock();
+            if (!t)
+            {
+                return;
+            }
+            t->supported_dhke_key_types = key_types;
+        });
+}
+
+void node::peer_record_tx(const peer_ptr_t& peer, const port_ptr_t& port, const sockaddr_t& to, size_t size)
+{
+    if (!peer || !port)
+    {
+        return;
+    }
+    auto& links = port->type == port_s::UNICAST ? peer->unicast_links : peer->multicast_links;
+    auto link_it = std::find_if(links.begin(), links.end(),
+        [&to, &port](const std::pair<peer_address_s, peer_link_ctx_s>& link)
+        {
+            return is_equal(link.first.address, to) && link.first.port == port;
+        });
+    if (link_it == links.end())
+    {
+        links.emplace_back(peer_address_s{port, to}, peer_link_ctx_s{});
+        link_it = std::prev(links.end());
+    }
+    link_it->second.last_activity_time_s = now_s();
+    link_it->second.sent_pkt++;
+    link_it->second.sent_byt += size;
+}
+
 void node::add_beacon(beacon_ptr_t beacon)
 {
     beacons.emplace_back(beacon);
@@ -416,7 +621,7 @@ void node::send_beacon(const beacon_ptr_t& beacon)
     }
 
     pdu.resize(frame.get_size());
-    beacon->peer.port->transport->out.push(transport_out_t{transport_data_s{0, beacon->peer.address, std::move(pdu)}});
+    beacon->peer.port->transport->in.push(transport_data_s{0, beacon->peer.address, std::move(pdu)});
 }
 
 void node::handle_pdu(const port_ptr_t& port, const sockaddr_t& from, sock_buff_t& pdu)
@@ -574,7 +779,7 @@ void node::handle_pdu(const port_ptr_t& port, const sockaddr_t& from, sock_buff_
 
 void node::on_port_in_queue_ready(const port_ptr_t& port)
 {
-    auto batch = port->transport->in.pop();
+    auto batch = port->transport->out.pop();
     if (batch.empty())
     {
         return;
@@ -582,7 +787,13 @@ void node::on_port_in_queue_ready(const port_ptr_t& port)
 
     for (auto& item : batch)
     {
-        handle_pdu(port, item.address, item.data);
+        std::visit([&](auto& v) {
+            using T = std::decay_t<decltype(v)>;
+            if constexpr (std::is_same_v<T, transport_data_s>)
+            {
+                handle_pdu(port, v.address, v.data);
+            }
+        }, item);
     }
 }
 
@@ -1197,7 +1408,7 @@ void node::peer_send_msg2(const peer_ptr_t& peer, const port_ptr_t& port, const 
     }
 
     pdu.resize(frame.get_size());
-    port->transport->out.push(transport_out_t{transport_data_s{0, to, std::move(pdu)}});
+    port->transport->in.push(transport_data_s{0, to, std::move(pdu)});
 }
 
 void node::peer_schedule_sec_ctx_renewal_timer(const peer_ptr_t& peer, security_ctx_s& sec_ctx, uint64_t expiration_time_s)
@@ -1443,7 +1654,7 @@ void node::peer_start_security_procedure(const peer_ptr_t& peer, procedure_compl
 
         auto pdu = bfc::sized_buffer(sec_proc_ctx.pdu.size());
         std::memcpy(pdu.data(), sec_proc_ctx.pdu.data(), pdu.size());
-        peer->preferred_peer_address.port->transport->out.push(transport_out_t{transport_data_s{0, peer->preferred_peer_address.address, std::move(pdu)}});
+        peer->preferred_peer_address.port->transport->in.push(transport_data_s{0, peer->preferred_peer_address.address, std::move(pdu)});
 
         sec_proc_ctx.state = security_procedure_ctx_s::E_SEC_PROC_STATE_SENDER_ONGOING;
         sec_proc_ctx.retry_count++;
@@ -2362,7 +2573,7 @@ void node::network_send_security_information(const port_ptr_t& port, const socka
         {
             return false;
         }
-        port->transport->out.push(transport_out_t{transport_data_s{0, to, std::move(*pdu)}});
+        port->transport->in.push(transport_data_s{0, to, std::move(*pdu)});
         return true;
     };
 
@@ -2397,7 +2608,7 @@ void node::network_send_security_information(const port_ptr_t& port, const socka
             return;
         }
 
-        port->transport->out.push(transport_out_t{transport_data_s{0, to, std::move(*encoded)}});
+        port->transport->in.push(transport_data_s{0, to, std::move(*encoded)});
     }
 }
 
@@ -2433,7 +2644,7 @@ void node::network_send_public_message(const Msg& msg)
         }
 
         pdu.resize(frame.get_size());
-        beacon->peer.port->transport->out.push(transport_out_t{transport_data_s{0, beacon->peer.address, std::move(pdu)}});
+        beacon->peer.port->transport->in.push(transport_data_s{0, beacon->peer.address, std::move(pdu)});
     }
 
     for (auto& [node_id, peer] : peers)
@@ -2461,8 +2672,8 @@ void node::network_send_public_message(const Msg& msg)
         }
 
         pdu.resize(frame.get_size());
-        peer->preferred_peer_address.port->transport->out.push(
-            transport_out_t{transport_data_s{0, peer->preferred_peer_address.address, std::move(pdu)}});
+        peer->preferred_peer_address.port->transport->in.push(
+            transport_data_s{0, peer->preferred_peer_address.address, std::move(pdu)});
     }
 }
 
@@ -2585,7 +2796,24 @@ bool node::network_try_send_frame(const port_ptr_t& port, const sockaddr_t& to, 
         return false;
     }
 
-    port->transport->out.push(transport_out_t{transport_data_s{0, to, std::move(pdu)}});
+    const size_t tx_size = pdu.size();
+    port->transport->in.push(transport_data_s{0, to, std::move(pdu)});
+    for (auto& [id, peer] : peers)
+    {
+        (void)id;
+        auto& links = port->type == port_s::UNICAST ? peer->unicast_links : peer->multicast_links;
+        auto link_it = std::find_if(links.begin(), links.end(),
+            [&to, &port](const std::pair<peer_address_s, peer_link_ctx_s>& link)
+            {
+                return is_equal(link.first.address, to) && link.first.port == port;
+            });
+        if (link_it != links.end())
+        {
+            link_it->second.last_activity_time_s = now_s();
+            link_it->second.sent_pkt++;
+            link_it->second.sent_byt += tx_size;
+        }
+    }
     return true;
 }
 
@@ -2632,7 +2860,9 @@ bool node::peer_send_message(const peer_ptr_t& peer, const port_ptr_t& port, con
         return false;
     }
 
-    port->transport->out.push(transport_out_t{transport_data_s{0, to, std::move(pdu)}});
+    const size_t tx_size = pdu.size();
+    port->transport->in.push(transport_data_s{0, to, std::move(pdu)});
+    peer_record_tx(peer, port, to, tx_size);
     return true;
 }
 

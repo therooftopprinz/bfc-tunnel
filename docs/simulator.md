@@ -16,9 +16,9 @@ Commands
 * `/node add [node_name] [console_port] [int_algs] [conf_algs] [dhke_keys]`
 * `/node mod [node_name] ([key]=[value])+`
 * `/node rem ([key])+`
-* `/node start [node_name]`
-* `/node stop  [node_name]`
 * `/node print ([+-][key]=[filter_value])+`
+
+Each running node process is controlled through its own console (see [console.md](console.md)). There is no sim-side `/node start` / `/node stop`; the node is live when the process is up, and `/stop` on the node console terminates that process.
 
 #### Example Config
 | node_name | console_addr | int_algs      | conf_algs | dhke_kts |

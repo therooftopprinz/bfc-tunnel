@@ -24,6 +24,24 @@ bool verify_integrity_mac(uint8_t integrity_algorithm, const key_t& key, bfc::co
 bool protect_frame_mac(frame_t& frame, uint8_t integrity_algorithm, const key_t& integrity_key);
 bool verify_frame_mac(const frame_const_t& frame, bfc::const_buffer_view pdu, uint8_t integrity_algorithm, const key_t& integrity_key);
 
+// Stream encrypt/decrypt of the PER payload body only (payload_type stays cleartext).
+// Nonce/IV material is 16 bytes: sn || ts || src (each u32 big-endian), zero-padded.
+// AES-CTR uses the full 16-byte block as the initial counter; ChaCha20 uses the first 12 bytes as nonce.
+bool encrypt_frame_payload(frame_t& frame, uint8_t confidentiality_algorithm, const key_t& confidentiality_key);
+bool decrypt_frame_payload(frame_t& frame, uint8_t confidentiality_algorithm, const key_t& confidentiality_key);
+
+// Bundled sec_ctx transform: encrypt then MAC (TX); verify MAC then decrypt (RX).
+bool protect_frame(frame_t& frame,
+                   uint8_t integrity_algorithm,
+                   const key_t& integrity_key,
+                   uint8_t confidentiality_algorithm,
+                   const key_t& confidentiality_key);
+bool accept_frame(frame_t& frame,
+                  uint8_t integrity_algorithm,
+                  const key_t& integrity_key,
+                  uint8_t confidentiality_algorithm,
+                  const key_t& confidentiality_key);
+
 } // namespace bfc_tunnel
 
 #endif // BFC_TUNNEL_SECURITY_KEY_UTILS_HPP

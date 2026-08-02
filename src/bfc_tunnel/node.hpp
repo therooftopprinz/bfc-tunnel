@@ -77,11 +77,15 @@ struct security_ctx_s
     uint64_t   creation_id;
     key_t      integrity_key;
     key_t      confidentiality_key;
+    key_t      rx_integrity_key;
+    key_t      rx_confidentiality_key;
     uint8_t    integrity_algorithm;
     uint8_t    confidentiality_algorithm;
     uint64_t   expiration_time_s = 0;
     bool       is_expiring = false;
     timer_id_t timer_id;
+    uint32_t   last_rx_sn = 0;
+    bool       has_rx_sn = false;
 };
 
 using security_ctx_t  = std::optional<security_ctx_s>;
@@ -103,6 +107,8 @@ struct network_key_ctx_s
     uint32_t         integrity_failure = 0;
 
     timer_id_t       expiration_timer_id;
+    // Replay: last accepted sn per remote src for this network sec_ctx.
+    std::unordered_map<node_id_t, uint32_t> last_rx_sn_by_src;
 };
 
 using network_key_contexts_t = std::deque<network_key_ctx_s>;
@@ -331,7 +337,7 @@ private:
     void send_beacon              (const beacon_ptr_t& beacon);
 
     void on_port_in_queue_ready   (const port_ptr_t& port);
-    void handle_pdu               (const port_ptr_t& port, const sockaddr_t& from, const sock_buff_t& pdu);
+    void handle_pdu               (const port_ptr_t& port, const sockaddr_t& from, sock_buff_t& pdu);
     void handle_beacon            (const port_ptr_t& port, const sockaddr_t& from, const frame_const_t& frame);
 
     void handle_btp_message(const port_ptr_t& port, const sockaddr_t& from, const frame_const_t& frame, cum::msg1& msg);
@@ -400,10 +406,13 @@ private:
     void                          network_send_keys_response(const peer_ptr_t& peer, const port_ptr_t& port, const sockaddr_t& to, const cum::network_keys_response& msg);
     void                          network_send_security_information(const port_ptr_t& port, const sockaddr_t& to);
     template<typename Msg> void   network_send_public_message(const Msg& msg);
-    bool                          network_accept_rx(const frame_const_t& frame, bfc::const_buffer_view pdu);
+    bool                          network_accept_rx(frame_t& frame);
     bool                          network_try_send_frame(const port_ptr_t& port, const sockaddr_t& to, bfc::sized_buffer pdu, uint8_t sec_ctx);
+    bool                          network_protect_frame(frame_t& frame, const network_key_ctx_s& ctx);
+    const network_key_ctx_s*      network_select_sec_ctx() const;
     network_key_ctx_s*            get_network_sec_ctx(uint8_t sec_ctx);
     const network_key_ctx_s*      get_network_sec_ctx(uint8_t sec_ctx) const;
+    bool                          peer_accept_rx(const peer_ptr_t& peer, frame_t& frame);
 
     bool                          decode_beacon(const frame_const_t& frame) const;
 
@@ -421,6 +430,7 @@ private:
 
     network_security_procedure_ctx_s network_security_procedure_ctx;
     network_key_contexts_t           network_security_contexts;
+    uint32_t                         network_tx_sn = 0;
     u8_vec_t                         supported_integrity_algorithms;
     u8_vec_t                         supported_confidentiality_algorithms;
 

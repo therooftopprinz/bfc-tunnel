@@ -76,13 +76,13 @@ Fields are encoded in network byte order (big-endian). Bit-fields that share a b
 - `reserved` is reserved for future use and MUST be set to zero on transmission.
 - `version` MUST match the negotiated protocol version.
 - `frame_type` selects the frame interpretation (see Frame Types).
-- `sec_ctx` selects the security context.
+- `sec_ctx` selects the security context (bundled integrity and confidentiality algorithms/keys for that context; either algorithm may be `NONE`).
 - `mac_size` is the MAC length in 32-bit units; MAC occupies `mac_size * 4` bytes.
 - `mac` is the message authentication code for the frame.
-- `sn` and `ts` provide replay-window and freshness inputs.
+- `sn` and `ts` provide replay-window and freshness inputs. Receivers MUST reject a secured frame whose `sn` is not strictly greater than the last accepted `sn` for that security association (peer: per peer `sec_ctx`; network: per `(src, sec_ctx)`).
 - `src` and `dst` are overlay Node IDs used for routing and policy checks.
 - `type` selects the payload interpretation (see Message Types).
-- `payload` is the PER-encoded message body for the selected `type`, or the ciphertext thereof when confidentiality protection is active.
+- `payload` is the PER-encoded message body for the selected `type`, or the ciphertext thereof when confidentiality protection is active. When confidentiality is active, TX encrypts the payload body then computes the MAC; RX verifies the MAC then decrypts.
 
 ---
 
@@ -202,8 +202,8 @@ At `security_ctx_grace_period_s` (default 30s) before expiration the context is 
 Contexts with more than `security_ctx_grace_period_s` remaining are preferred; an expiring context is used only when no fresher context is available.
 The expiring context is removed at its expiration time.
 
-In local broadcast transport it is possible to have concurrent MSG1 from n1 and n2,
-in this case the later MSG1 should be cancelled to let the earlier MSG1 complete the handshake. 
+In local broadcast transport it is possible to have concurrent MSG1 from both peers.
+Arbitration uses MSG1 `priority`: the higher-priority MSG1 wins (the local sender aborts so it can complete as responder). If priorities are equal, the local sender aborts and restarts its own handshake.
 
 **Key Exchange Handshake**
 
@@ -265,6 +265,7 @@ title Key Exchange
 
 Network security protects NETWORK and NETWORK_OVER_PEER frames with a shared security context (`sec_ctx`).
 Each context carries integrity and confidentiality keys, a priority, and an absolute expiration time.
+Selecting a `sec_ctx` applies both integrity and confidentiality from that context (algorithms may individually be `NONE`).
 
 Each local network security context also tracks RX integrity stats:
 * `integrity_success` — successfully verified NETWORK frames

@@ -3,14 +3,17 @@
 #include <bfc_tunnel/security/x25519_dh.hpp>
 
 #include <botan/ed25519.h>
+#include <botan/block_cipher.h>
 #include <botan/mac.h>
 #include <botan/pubkey.h>
+#include <botan/stream_cipher.h>
 #include <botan/system_rng.h>
 
 #include <array>
 #include <algorithm>
 #include <cstring>
 #include <stdexcept>
+#include <string>
 #include <vector>
 
 namespace bfc_tunnel
@@ -218,6 +221,149 @@ bool verify_frame_mac(const frame_const_t& frame, bfc::const_buffer_view pdu, ui
         integrity_key,
         bfc::const_buffer_view(authenticated.data(), authenticated.size()),
         bfc::const_buffer_view(pdu.data() + frame_const_t::k_fixed_prefix_size, mac_size));
+}
+
+namespace
+{
+
+std::array<uint8_t, 16> frame_cipher_iv(const frame_const_t& frame)
+{
+    std::array<uint8_t, 16> iv{};
+    const auto put_u32 = [&](size_t offset, uint32_t value)
+    {
+        iv[offset]     = static_cast<uint8_t>((value >> 24) & 0xFF);
+        iv[offset + 1] = static_cast<uint8_t>((value >> 16) & 0xFF);
+        iv[offset + 2] = static_cast<uint8_t>((value >> 8) & 0xFF);
+        iv[offset + 3] = static_cast<uint8_t>(value & 0xFF);
+    };
+    put_u32(0, frame.get_sn());
+    put_u32(4, frame.get_ts());
+    put_u32(8, frame.get_src());
+    return iv;
+}
+
+void ctr_xor_inplace(Botan::BlockCipher& cipher, std::array<uint8_t, 16> counter, uint8_t* data, size_t len)
+{
+    std::array<uint8_t, 16> keystream{};
+    size_t offset = 0;
+    while (offset < len)
+    {
+        cipher.encrypt(counter.data(), keystream.data());
+        const size_t n = std::min<size_t>(16, len - offset);
+        for (size_t i = 0; i < n; ++i)
+        {
+            data[offset + i] ^= keystream[i];
+        }
+        offset += n;
+
+        for (int i = 15; i >= 0; --i)
+        {
+            if (++counter[static_cast<size_t>(i)] != 0)
+            {
+                break;
+            }
+        }
+    }
+}
+
+bool cipher_frame_payload(frame_t& frame, uint8_t confidentiality_algorithm, const key_t& confidentiality_key)
+{
+    if (confidentiality_algorithm == E_CA_NONE)
+    {
+        return true;
+    }
+
+    const size_t expected_key_size = confidentiality_key_size(confidentiality_algorithm);
+    if (expected_key_size == 0 || confidentiality_key.size() != expected_key_size)
+    {
+        return false;
+    }
+
+    const size_t payload_size = frame.get_payload_size();
+    if (payload_size == 0)
+    {
+        return true;
+    }
+
+    auto* payload = reinterpret_cast<uint8_t*>(frame.get_payload());
+    const auto iv = frame_cipher_iv(frame_const_t(frame.get_base(), frame.get_size()));
+
+    try
+    {
+        if (confidentiality_algorithm == E_CA_CHACHA20)
+        {
+            auto cipher = Botan::StreamCipher::create_or_throw("ChaCha20");
+            cipher->set_key(reinterpret_cast<const uint8_t*>(confidentiality_key.data()), confidentiality_key.size());
+            // ChaCha20 accepts 8/12/24-byte nonces; use first 12 bytes of frame IV.
+            cipher->set_iv(iv.data(), 12);
+            cipher->cipher1(payload, payload_size);
+            return true;
+        }
+
+        const char* aes_name = nullptr;
+        if (confidentiality_algorithm == E_CA_AES128)
+        {
+            aes_name = "AES-128";
+        }
+        else if (confidentiality_algorithm == E_CA_AES256)
+        {
+            aes_name = "AES-256";
+        }
+        else
+        {
+            return false;
+        }
+
+        // Minimized Botan build includes AES block cipher but not CTR mode; implement CTR here.
+        auto cipher = Botan::BlockCipher::create_or_throw(aes_name);
+        cipher->set_key(reinterpret_cast<const uint8_t*>(confidentiality_key.data()), confidentiality_key.size());
+        ctr_xor_inplace(*cipher, iv, payload, payload_size);
+        return true;
+    }
+    catch (const std::exception&)
+    {
+        return false;
+    }
+}
+
+} // namespace
+
+bool encrypt_frame_payload(frame_t& frame, uint8_t confidentiality_algorithm, const key_t& confidentiality_key)
+{
+    return cipher_frame_payload(frame, confidentiality_algorithm, confidentiality_key);
+}
+
+bool decrypt_frame_payload(frame_t& frame, uint8_t confidentiality_algorithm, const key_t& confidentiality_key)
+{
+    return cipher_frame_payload(frame, confidentiality_algorithm, confidentiality_key);
+}
+
+bool protect_frame(frame_t& frame,
+                   uint8_t integrity_algorithm,
+                   const key_t& integrity_key,
+                   uint8_t confidentiality_algorithm,
+                   const key_t& confidentiality_key)
+{
+    if (!encrypt_frame_payload(frame, confidentiality_algorithm, confidentiality_key))
+    {
+        return false;
+    }
+    return protect_frame_mac(frame, integrity_algorithm, integrity_key);
+}
+
+bool accept_frame(frame_t& frame,
+                  uint8_t integrity_algorithm,
+                  const key_t& integrity_key,
+                  uint8_t confidentiality_algorithm,
+                  const key_t& confidentiality_key)
+{
+    const frame_const_t cframe(frame.get_base(), frame.get_size());
+    const bfc::const_buffer_view pdu(frame.get_base(), frame.get_size());
+    if (!verify_frame_mac(cframe, pdu, integrity_algorithm, integrity_key))
+    {
+        return false;
+    }
+    return decrypt_frame_payload(frame, confidentiality_algorithm, confidentiality_key);
 }
 
 key_t sign_x25519(const key_t& private_key, bfc::const_buffer_view message)

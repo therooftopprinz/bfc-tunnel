@@ -136,6 +136,119 @@ TEST(network_key_utils, protect_frame_mac_none_integrity)
         empty_key));
 }
 
+TEST(network_key_utils, protect_and_accept_frame_round_trip_with_confidentiality)
+{
+    const bfc_key_t integrity_key(32, 0x5a);
+    const bfc_key_t confidentiality_key(32, 0xc3);
+
+    bfc::sized_buffer pdu(1024);
+    auto frame = bfc_tunnel::prepare_frame(pdu);
+    frame.set_ttl(0);
+    frame.set_frame_type(bfc_tunnel::E_FRAME_TYPE_NETWORK);
+    frame.set_sec_ctx(3);
+    frame.set_mac_size(bfc_tunnel::integrity_mac_size(bfc_tunnel::E_EA_HMAC_SHA2_256));
+    frame.set_sn(42);
+    frame.set_src(7);
+    frame.set_dst(0xFFFFFFFF);
+    frame.set_ts(12345);
+
+    cum::network_key_refresh msg;
+    msg.keys.push_back(cum::network_key{
+        3,
+        7,
+        999999,
+        bfc_tunnel::E_EA_HMAC_SHA2_256,
+        bfc_key_t(32, 0x11),
+        bfc_tunnel::E_CA_CHACHA20,
+        bfc_key_t(32, 0x22),
+    });
+    ASSERT_TRUE(bfc_tunnel::encode_payload(frame, msg));
+    pdu.resize(frame.get_size());
+
+    std::vector<std::byte> plaintext(frame.get_payload(), frame.get_payload() + frame.get_payload_size());
+    ASSERT_TRUE(bfc_tunnel::protect_frame(
+        frame,
+        bfc_tunnel::E_EA_HMAC_SHA2_256,
+        integrity_key,
+        bfc_tunnel::E_CA_CHACHA20,
+        confidentiality_key));
+    EXPECT_NE(0, std::memcmp(frame.get_payload(), plaintext.data(), plaintext.size()));
+
+    bfc_tunnel::frame_t rx(pdu.data(), pdu.size());
+    ASSERT_TRUE(bfc_tunnel::accept_frame(
+        rx,
+        bfc_tunnel::E_EA_HMAC_SHA2_256,
+        integrity_key,
+        bfc_tunnel::E_CA_CHACHA20,
+        confidentiality_key));
+    EXPECT_EQ(0, std::memcmp(rx.get_payload(), plaintext.data(), plaintext.size()));
+}
+
+TEST(network_key_utils, accept_frame_rejects_tamper)
+{
+    const bfc_key_t integrity_key(32, 0x5a);
+    const bfc_key_t confidentiality_key(32, 0xc3);
+
+    bfc::sized_buffer pdu(1024);
+    auto frame = bfc_tunnel::prepare_frame(pdu);
+    frame.set_ttl(0);
+    frame.set_frame_type(bfc_tunnel::E_FRAME_TYPE_NETWORK);
+    frame.set_sec_ctx(3);
+    frame.set_mac_size(bfc_tunnel::integrity_mac_size(bfc_tunnel::E_EA_HMAC_SHA2_256));
+    frame.set_sn(1);
+    frame.set_src(2);
+    frame.set_dst(3);
+    frame.set_ts(4);
+
+    cum::network_key_refresh msg;
+    msg.keys.push_back(cum::network_key{
+        3, 1, 9, bfc_tunnel::E_EA_HMAC_SHA2_256, bfc_key_t(32, 0x11),
+        bfc_tunnel::E_CA_AES256, bfc_key_t(32, 0x22)});
+    ASSERT_TRUE(bfc_tunnel::encode_payload(frame, msg));
+    pdu.resize(frame.get_size());
+    ASSERT_TRUE(bfc_tunnel::protect_frame(
+        frame,
+        bfc_tunnel::E_EA_HMAC_SHA2_256,
+        integrity_key,
+        bfc_tunnel::E_CA_AES256,
+        confidentiality_key));
+
+    pdu.data()[pdu.size() - 1] ^= std::byte{0x01};
+    bfc_tunnel::frame_t rx(pdu.data(), pdu.size());
+    EXPECT_FALSE(bfc_tunnel::accept_frame(
+        rx,
+        bfc_tunnel::E_EA_HMAC_SHA2_256,
+        integrity_key,
+        bfc_tunnel::E_CA_AES256,
+        confidentiality_key));
+}
+
+TEST(network_key_utils, protect_frame_none_algorithms_are_noop)
+{
+    bfc::sized_buffer pdu(1024);
+    auto frame = bfc_tunnel::prepare_frame(pdu);
+    frame.set_ttl(0);
+    frame.set_frame_type(bfc_tunnel::E_FRAME_TYPE_NETWORK);
+    frame.set_sec_ctx(1);
+    frame.set_mac_size_units(0);
+    frame.set_sn(1);
+    frame.set_src(2);
+    frame.set_dst(3);
+    frame.set_ts(4);
+
+    cum::beacon msg;
+    msg.flags = 0;
+    ASSERT_TRUE(bfc_tunnel::encode_payload(frame, msg));
+    pdu.resize(frame.get_size());
+
+    std::vector<std::byte> before(frame.get_payload(), frame.get_payload() + frame.get_payload_size());
+    const bfc_key_t empty;
+    ASSERT_TRUE(bfc_tunnel::protect_frame(frame, bfc_tunnel::E_EA_NONE, empty, bfc_tunnel::E_CA_NONE, empty));
+    EXPECT_EQ(0, std::memcmp(frame.get_payload(), before.data(), before.size()));
+    bfc_tunnel::frame_t rx(pdu.data(), pdu.size());
+    ASSERT_TRUE(bfc_tunnel::accept_frame(rx, bfc_tunnel::E_EA_NONE, empty, bfc_tunnel::E_CA_NONE, empty));
+}
+
 TEST(network_key_messages, beacon_and_request_response_round_trip)
 {
     std::array<std::byte, 512> buf{};

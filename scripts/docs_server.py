@@ -5,13 +5,8 @@ from __future__ import annotations
 
 import argparse
 import hashlib
-import os
-import select
-import struct
-import sys
 import threading
 import time
-from collections.abc import Callable
 from pathlib import Path
 
 from flask import Flask, Response, abort, jsonify, render_template_string, request, send_from_directory, stream_with_context
@@ -20,7 +15,6 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 DOCS_DIR = REPO_ROOT / "docs"
 DEFAULT_PORT = 8080
 POLL_INTERVAL = 0.25
-DEBOUNCE_SECONDS = 0.2
 NO_CACHE_HEADERS = {
     "Cache-Control": "no-store, no-cache, must-revalidate",
     "Pragma": "no-cache",
@@ -30,20 +24,42 @@ INDEX_RELOAD_SCRIPT = """
 (function () {
   let version = {{ version }};
   const status = document.getElementById("reload-status");
+  const listEl = document.getElementById("doc-list");
 
-  function reloadNow() {
-    if (status) status.textContent = "Docs updated — reloading…";
-    window.location.reload();
+  function setStatus(text) {
+    if (status) status.textContent = text;
+  }
+
+  function renderDocs(docs) {
+    if (!listEl) return;
+    listEl.innerHTML = docs.map((doc) =>
+      '<li><a href="/' + doc + '">' + doc + "</a></li>"
+    ).join("");
+  }
+
+  async function refreshList() {
+    try {
+      const resp = await fetch("/api/docs", { cache: "no-store" });
+      const data = await resp.json();
+      if (typeof data.version === "number") version = data.version;
+      renderDocs(data.docs || []);
+      setStatus("Watching for new docs");
+    } catch (_) {
+      setStatus("List refresh failed");
+    }
+  }
+
+  function onListChange(next) {
+    version = next;
+    setStatus("Docs list updated…");
+    refreshList();
   }
 
   function connectEvents() {
     const source = new EventSource("/events");
     source.addEventListener("version", (event) => {
       const next = Number(event.data);
-      if (!Number.isNaN(next) && next !== version) {
-        source.close();
-        reloadNow();
-      }
+      if (!Number.isNaN(next) && next !== version) onListChange(next);
     });
     source.onerror = () => {
       source.close();
@@ -55,15 +71,39 @@ INDEX_RELOAD_SCRIPT = """
     try {
       const resp = await fetch("/version", { cache: "no-store" });
       const data = await resp.json();
-      if (data.version !== version) reloadNow();
+      if (data.version !== version) onListChange(data.version);
     } catch (_) {}
   }
 
-  if (window.EventSource) {
-    connectEvents();
-  } else {
-    setInterval(checkVersion, 500);
+  const form = document.getElementById("new-doc-form");
+  const input = document.getElementById("new-doc-name");
+  const formStatus = document.getElementById("new-doc-status");
+  if (form && input) {
+    form.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      let name = input.value.trim().replace(/^\\/+/, "");
+      if (!name) return;
+      if (!name.endsWith(".md")) name += ".md";
+      if (formStatus) formStatus.textContent = "Creating…";
+      try {
+        const resp = await fetch("/api/doc/" + encodeURIComponent(name).replace(/%2F/g, "/"), {
+          method: "PUT",
+          headers: { "Content-Type": "text/markdown; charset=utf-8" },
+          body: "# " + name.replace(/\\.md$/, "").replace(/[_-]/g, " ") + "\\n",
+        });
+        const data = await resp.json().catch(() => ({}));
+        if (!resp.ok) throw new Error(data.error || ("HTTP " + resp.status));
+        input.value = "";
+        if (formStatus) formStatus.textContent = "Created";
+        window.location.href = "/" + name;
+      } catch (err) {
+        if (formStatus) formStatus.textContent = err.message;
+      }
+    });
   }
+
+  if (window.EventSource) connectEvents();
+  else setInterval(checkVersion, 1000);
 })();
 """
 
@@ -696,7 +736,7 @@ PAGE_TEMPLATE = """<!DOCTYPE html>
     }
 
     function connectEvents() {
-      const source = new EventSource("/events");
+      const source = new EventSource("/events?path=" + encodeURIComponent(DOC_PATH));
       source.addEventListener("version", (event) => {
         const next = Number(event.data);
         if (!Number.isNaN(next) && next !== version) onExternalChange(next);
@@ -709,7 +749,10 @@ PAGE_TEMPLATE = """<!DOCTYPE html>
 
     async function checkVersion() {
       try {
-        const resp = await fetch("/version", { cache: "no-store" });
+        const resp = await fetch(
+          "/version?path=" + encodeURIComponent(DOC_PATH),
+          { cache: "no-store" }
+        );
         const data = await resp.json();
         if (data.version !== version) onExternalChange(data.version);
       } catch (_) {}
@@ -795,34 +838,71 @@ INDEX_TEMPLATE = """<!DOCTYPE html>
     a:hover { text-decoration: underline; }
     ul { list-style: none; padding: 0; }
     li { margin: 0.6rem 0; }
+    .new-doc {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.5rem;
+      align-items: center;
+      margin: 1.25rem 0 1.75rem;
+    }
+    .new-doc input {
+      flex: 1;
+      min-width: 12rem;
+      border: 1px solid var(--border);
+      background: var(--bg);
+      color: var(--fg);
+      border-radius: 6px;
+      padding: 0.4rem 0.65rem;
+      font: inherit;
+    }
+    .new-doc button {
+      appearance: none;
+      border: 1px solid var(--border);
+      background: transparent;
+      color: var(--fg);
+      border-radius: 6px;
+      padding: 0.4rem 0.75rem;
+      font: inherit;
+      cursor: pointer;
+    }
+    .new-doc button:hover { border-color: var(--link); color: var(--link); }
+    .new-doc .hint { color: var(--muted); font-size: 0.85rem; width: 100%; }
   </style>
-  <script>{{ reload_script | safe }}</script>
 </head>
 <body>
   <header>
     <strong>docs</strong>
-    <span class="status" id="reload-status">Watching for changes</span>
+    <span class="status" id="reload-status">Watching for new docs</span>
   </header>
   <main>
     <h1>Documentation</h1>
-    <ul>
+    <form class="new-doc" id="new-doc-form">
+      <input id="new-doc-name" type="text" placeholder="new-note.md" autocomplete="off" spellcheck="false">
+      <button type="submit">Add markdown</button>
+      <span class="hint" id="new-doc-status">New files appear here automatically. Open a doc to watch its content.</span>
+    </form>
+    <ul id="doc-list">
       {% for doc in docs %}
       <li><a href="/{{ doc }}">{{ doc }}</a></li>
       {% endfor %}
     </ul>
   </main>
+  <script>{{ reload_script | safe }}</script>
 </body>
 </html>
 """
 
 
-def resolve_doc_path(docs_dir: Path, relative: str) -> Path | None:
+def resolve_doc_path(docs_dir: Path, relative: str, *, must_exist: bool = True) -> Path | None:
+    relative = relative.replace("\\", "/").lstrip("/")
+    if not relative or any(part in ("", ".", "..") for part in relative.split("/")):
+        return None
     candidate = (docs_dir / relative).resolve()
     try:
         candidate.relative_to(docs_dir.resolve())
     except ValueError:
         return None
-    if not candidate.is_file():
+    if must_exist and not candidate.is_file():
         return None
     return candidate
 
@@ -844,152 +924,93 @@ def file_fingerprint(path: Path) -> str:
     return digest.hexdigest()
 
 
-def collect_snapshots(root: Path) -> dict[str, str]:
-    snapshots: dict[str, str] = {}
-    if not root.exists():
-        return snapshots
-    for path in root.rglob("*"):
-        if path.is_file():
-            rel = str(path.relative_to(root)).replace("\\", "/")
-            try:
-                snapshots[rel] = file_fingerprint(path)
-            except OSError:
-                continue
-    return snapshots
-
-
-def watch_with_inotify(
-    root: Path,
-    on_activity: Callable[[], None],
-    stop: threading.Event,
-) -> bool:
-    """Return True when inotify watching starts successfully."""
-    if sys.platform != "linux":
-        return False
-
-    import ctypes
-
-    libc = ctypes.CDLL("libc.so.6", use_errno=True)
-    libc.inotify_init.restype = ctypes.c_int
-    libc.inotify_add_watch.restype = ctypes.c_int
-    libc.inotify_add_watch.argtypes = [ctypes.c_int, ctypes.c_char_p, ctypes.c_uint32]
-
-    in_close_write = 0x00000008
-    in_moved_to = 0x00000080
-    in_create = 0x00000100
-    in_delete = 0x00000200
-    in_modify = 0x00000002
-    in_moved_from = 0x00000040
-    in_isdir = 0x40000000
-    mask = in_close_write | in_moved_to | in_create | in_delete | in_modify | in_moved_from
-
-    fd = libc.inotify_init()
-    if fd < 0:
-        return False
-
-    wd_to_path: dict[int, Path] = {}
-
-    def add_watch(path: Path) -> None:
-        watch_descriptor = libc.inotify_add_watch(fd, str(path).encode(), mask)
-        if watch_descriptor >= 0:
-            wd_to_path[watch_descriptor] = path
-
-    def add_tree(path: Path) -> None:
-        add_watch(path)
-        for child in path.rglob("*"):
-            if child.is_dir():
-                add_watch(child)
-
-    add_tree(root)
-
-    try:
-        while not stop.is_set():
-            ready, _, _ = select.select([fd], [], [], 0.5)
-            if not ready:
-                continue
-
-            try:
-                data = os.read(fd, 65536)
-            except OSError:
-                continue
-
-            offset = 0
-            while offset + 16 <= len(data):
-                watch_descriptor, event_mask, _cookie, name_len = struct.unpack_from(
-                    "iIII", data, offset
-                )
-                offset += 16
-                name = data[offset : offset + name_len].split(b"\0", 1)[0].decode(
-                    errors="replace"
-                )
-                offset += name_len
-
-                base = wd_to_path.get(watch_descriptor, root)
-                if event_mask & in_isdir and (event_mask & in_create) and name:
-                    new_dir = base / name
-                    if new_dir.is_dir():
-                        add_watch(new_dir)
-
-                if event_mask & (
-                    in_close_write
-                    | in_moved_to
-                    | in_delete
-                    | in_modify
-                    | in_moved_from
-                    | in_create
-                ):
-                    on_activity()
-    finally:
-        os.close(fd)
-
-    return True
-
-
 def create_app(docs_dir: Path) -> Flask:
     app = Flask(__name__)
     docs_dir = docs_dir.resolve()
-    reload_version = 0
     version_condition = threading.Condition()
     watcher_stop = threading.Event()
-    debounce_timer: threading.Timer | None = None
-    debounce_lock = threading.Lock()
-    snapshot_lock = threading.Lock()
-    previous_snapshot = collect_snapshots(docs_dir)
+    watch_lock = threading.Lock()
 
-    def bump_version() -> int:
-        nonlocal reload_version
+    # Content versions are tracked only for docs currently open in a browser.
+    watched_counts: dict[str, int] = {}
+    path_fingerprints: dict[str, str] = {}
+    path_versions: dict[str, int] = {}
+    list_version = 0
+    previous_doc_list = list_markdown_files(docs_dir)
+
+    def bump_list_version() -> int:
+        nonlocal list_version
         with version_condition:
-            reload_version += 1
+            list_version += 1
             version_condition.notify_all()
-            return reload_version
+            return list_version
 
-    def apply_if_changed() -> None:
-        nonlocal previous_snapshot
-        current = collect_snapshots(docs_dir)
-        with snapshot_lock:
-            if current != previous_snapshot:
-                previous_snapshot = current
-                bump_version()
+    def bump_path_version(doc_path: str) -> int:
+        with version_condition:
+            path_versions[doc_path] = path_versions.get(doc_path, 0) + 1
+            version_condition.notify_all()
+            return path_versions[doc_path]
 
-    def schedule_check() -> None:
-        nonlocal debounce_timer
-        with debounce_lock:
-            if debounce_timer is not None:
-                debounce_timer.cancel()
-            debounce_timer = threading.Timer(DEBOUNCE_SECONDS, apply_if_changed)
-            debounce_timer.daemon = True
-            debounce_timer.start()
+    def current_path_version(doc_path: str) -> int:
+        with version_condition:
+            return path_versions.get(doc_path, 0)
 
-    def poll_docs() -> None:
+    def current_list_version() -> int:
+        with version_condition:
+            return list_version
+
+    def fingerprint_or_empty(doc_path: str) -> str:
+        path = docs_dir / doc_path
+        try:
+            if path.is_file():
+                return file_fingerprint(path)
+        except OSError:
+            pass
+        return ""
+
+    def acquire_watch(doc_path: str) -> None:
+        with watch_lock:
+            watched_counts[doc_path] = watched_counts.get(doc_path, 0) + 1
+            if watched_counts[doc_path] == 1:
+                path_fingerprints[doc_path] = fingerprint_or_empty(doc_path)
+
+    def release_watch(doc_path: str) -> None:
+        with watch_lock:
+            count = watched_counts.get(doc_path, 0) - 1
+            if count <= 0:
+                watched_counts.pop(doc_path, None)
+                path_fingerprints.pop(doc_path, None)
+            else:
+                watched_counts[doc_path] = count
+
+    def note_saved_fingerprint(doc_path: str, fingerprint: str) -> None:
+        with watch_lock:
+            if doc_path in watched_counts:
+                path_fingerprints[doc_path] = fingerprint
+
+    def poll_open_docs() -> None:
+        nonlocal previous_doc_list
         while not watcher_stop.is_set():
             time.sleep(POLL_INTERVAL)
-            apply_if_changed()
 
-    def inotify_docs() -> None:
-        watch_with_inotify(docs_dir, schedule_check, watcher_stop)
+            current_list = list_markdown_files(docs_dir)
+            if current_list != previous_doc_list:
+                previous_doc_list = current_list
+                bump_list_version()
 
-    threading.Thread(target=poll_docs, daemon=True, name="docs-poll").start()
-    threading.Thread(target=inotify_docs, daemon=True, name="docs-inotify").start()
+            with watch_lock:
+                open_paths = list(watched_counts)
+            for doc_path in open_paths:
+                fingerprint = fingerprint_or_empty(doc_path)
+                with watch_lock:
+                    if doc_path not in watched_counts:
+                        continue
+                    if path_fingerprints.get(doc_path) == fingerprint:
+                        continue
+                    path_fingerprints[doc_path] = fingerprint
+                bump_path_version(doc_path)
+
+    threading.Thread(target=poll_open_docs, daemon=True, name="docs-poll").start()
 
     @app.after_request
     def disable_html_cache(response: Response):
@@ -998,9 +1019,7 @@ def create_app(docs_dir: Path) -> Flask:
         return response
 
     def reload_script() -> str:
-        with version_condition:
-            current = reload_version
-        return render_template_string(INDEX_RELOAD_SCRIPT, version=current)
+        return render_template_string(INDEX_RELOAD_SCRIPT, version=current_list_version())
 
     def normalize_markdown_path(doc_path: str) -> str:
         if doc_path.endswith("/"):
@@ -1011,25 +1030,48 @@ def create_app(docs_dir: Path) -> Flask:
 
     @app.get("/version")
     def version():
-        with version_condition:
-            current = reload_version
-        return jsonify(version=current)
+        doc_path = request.args.get("path")
+        if doc_path:
+            doc_path = normalize_markdown_path(doc_path)
+            return jsonify(version=current_path_version(doc_path), path=doc_path)
+        return jsonify(version=current_list_version())
 
     @app.get("/events")
     def events():
+        doc_path = request.args.get("path")
+        if doc_path:
+            doc_path = normalize_markdown_path(doc_path)
+            if resolve_doc_path(docs_dir, doc_path) is None:
+                abort(404)
+
         @stream_with_context
         def event_stream():
-            last_sent = -1
-            while not watcher_stop.is_set():
-                with version_condition:
-                    if reload_version == last_sent:
-                        version_condition.wait(timeout=15.0)
-                    current = reload_version
-                if current != last_sent:
-                    last_sent = current
-                    yield f"event: version\ndata: {current}\n\n"
-                else:
-                    yield ": keepalive\n\n"
+            if doc_path:
+                acquire_watch(doc_path)
+            try:
+                last_sent = -1
+                while not watcher_stop.is_set():
+                    with version_condition:
+                        current = (
+                            path_versions.get(doc_path, 0)
+                            if doc_path
+                            else list_version
+                        )
+                        if current == last_sent:
+                            version_condition.wait(timeout=15.0)
+                            current = (
+                                path_versions.get(doc_path, 0)
+                                if doc_path
+                                else list_version
+                            )
+                    if current != last_sent:
+                        last_sent = current
+                        yield f"event: version\ndata: {current}\n\n"
+                    else:
+                        yield ": keepalive\n\n"
+            finally:
+                if doc_path:
+                    release_watch(doc_path)
 
         return Response(
             event_stream(),
@@ -1049,18 +1091,27 @@ def create_app(docs_dir: Path) -> Flask:
             reload_script=reload_script(),
         )
 
+    @app.get("/api/docs")
+    def api_docs():
+        return jsonify(docs=list_markdown_files(docs_dir), version=current_list_version())
+
     @app.get("/api/doc/<path:doc_path>")
     def get_doc(doc_path: str):
         doc_path = normalize_markdown_path(doc_path)
         doc_file = resolve_doc_path(docs_dir, doc_path)
         if doc_file is None:
             abort(404)
-        return jsonify(source=doc_file.read_text(encoding="utf-8"), path=doc_path)
+        return jsonify(
+            source=doc_file.read_text(encoding="utf-8"),
+            path=doc_path,
+            version=current_path_version(doc_path),
+        )
 
     @app.put("/api/doc/<path:doc_path>")
     def put_doc(doc_path: str):
+        nonlocal previous_doc_list
         doc_path = normalize_markdown_path(doc_path)
-        doc_file = resolve_doc_path(docs_dir, doc_path)
+        doc_file = resolve_doc_path(docs_dir, doc_path, must_exist=False)
         if doc_file is None:
             abort(404)
 
@@ -1068,16 +1119,20 @@ def create_app(docs_dir: Path) -> Flask:
         if body is None:
             return jsonify(error="empty body"), 400
 
+        created = not doc_file.exists()
         try:
+            doc_file.parent.mkdir(parents=True, exist_ok=True)
             doc_file.write_text(body, encoding="utf-8")
         except OSError as exc:
             return jsonify(error=str(exc)), 500
 
         fingerprint = file_fingerprint(doc_file)
-        with snapshot_lock:
-            previous_snapshot[doc_path] = fingerprint
-        new_version = bump_version()
-        return jsonify(ok=True, version=new_version, path=doc_path)
+        note_saved_fingerprint(doc_path, fingerprint)
+        if created:
+            previous_doc_list = list_markdown_files(docs_dir)
+            bump_list_version()
+        new_version = bump_path_version(doc_path)
+        return jsonify(ok=True, version=new_version, path=doc_path, created=created)
 
     @app.get("/<path:doc_path>")
     def serve_doc(doc_path: str):
@@ -1096,14 +1151,12 @@ def create_app(docs_dir: Path) -> Flask:
 
         source = doc_file.read_text(encoding="utf-8")
         title = doc_file.stem.replace("-", " ").replace("_", " ").title()
-        with version_condition:
-            current = reload_version
         return render_template_string(
             PAGE_TEMPLATE,
             title=title,
             markdown_source=source,
             doc_path=doc_path,
-            version=current,
+            version=current_path_version(doc_path),
             breadcrumb=f"/{doc_path}",
             breadcrumb_name=doc_path,
         )

@@ -89,10 +89,13 @@ When a recognized context already has `integrity_success > 0` and integrity veri
 ### [Node.NetworkKeyRefresh] Network Key Refresh
 `node.network.key_refresh_interval_s` is a mandatory periodic broadcast: when the node has one or more network keys, it sends them (`NETWORK:network_key_refresh`) on that interval as a NETWORK frame with broadcast destination and TTL 0, on configured beacon destinations (multicast beacons and static-unicast peers).
 
-The frame is protected with the selected network `sec_ctx` integrity algorithm and key. Receivers that already possess that context verify the MAC and may install/update advertised keys via conflict resolution. Nodes that lack the context cannot participate on NETWORK; they drop the frame and run network security acquisition instead. Refresh is not a bootstrap path for missing network keys.
+The frame is protected with the selected network `sec_ctx` (integrity and confidentiality together). Receivers that already possess that context accept the frame and may install/update advertised keys via conflict resolution. Nodes that lack the context cannot participate on NETWORK; they drop the frame and run network security acquisition instead. Refresh is not a bootstrap path for missing network keys. A verified refresh may advertise multiple keys; receivers apply conflict resolution to each advertised key.
 
 Triggers:
 * Timer
 
 ### [Node.Security] Network Security
 **Key selection**
+* Prefer the oldest non-expiring context (smallest `expiration_time_s` among contexts with more than `security_ctx_grace_period_s` remaining).
+* A context is expiring when `expiration_time_s` is less than `now + security_ctx_grace_period_s`.
+* If no non-expiring context exists, prefer the oldest still-valid expiring context.

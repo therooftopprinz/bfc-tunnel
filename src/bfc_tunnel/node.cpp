@@ -419,7 +419,7 @@ void node::send_beacon(const beacon_ptr_t& beacon)
     beacon->peer.port->transport->out.push(transport_out_t{transport_data_s{0, beacon->peer.address, std::move(pdu)}});
 }
 
-void node::handle_pdu(const port_ptr_t& port, const sockaddr_t& from, const sock_buff_t& pdu)
+void node::handle_pdu(const port_ptr_t& port, const sockaddr_t& from, sock_buff_t& pdu)
 {
     if (pdu.empty())
     {
@@ -427,9 +427,9 @@ void node::handle_pdu(const port_ptr_t& port, const sockaddr_t& from, const sock
         return;
     }
 
-    auto frame = to_frame(pdu.data(), pdu.size());
+    frame_t frame(pdu.data(), pdu.size());
 
-    if (!validate_frame(frame))
+    if (!validate_frame(frame_const_t(frame.get_base(), frame.get_size())))
     {
         log(*g_logger, E_LOG_BIT_ERROR, "node[%p]::handle_pdu: Invalid frame!", this);
         return;
@@ -438,15 +438,26 @@ void node::handle_pdu(const port_ptr_t& port, const sockaddr_t& from, const sock
     const auto frame_type = frame.get_frame_type();
     if (frame_type == E_FRAME_TYPE_NETWORK || frame_type == E_FRAME_TYPE_NETWORK_OVER_PEER)
     {
-        if (!network_accept_rx(frame, bfc::const_buffer_view(pdu.data(), pdu.size())))
+        if (!network_accept_rx(frame))
+        {
+            return;
+        }
+    }
+    else if (frame_type == E_FRAME_TYPE_PEER && frame.get_sec_ctx() != k_sec_ctx_none)
+    {
+        const node_id_t peer_node_id = frame.get_src();
+        auto peer = peer_lookup(peer_node_id, port, from);
+        if (!peer || !peer_accept_rx(peer, frame))
         {
             return;
         }
     }
 
+    const frame_const_t cframe(frame.get_base(), frame.get_size());
+
     if (frame.get_payload_type() == E_PAYLOAD_TYPE_BEACON)
     {
-        handle_beacon(port, from, frame);
+        handle_beacon(port, from, cframe);
         return;
     }
     else if (frame.get_payload_type() == E_PAYLOAD_TYPE_TUNNEL_DATA)
@@ -454,7 +465,7 @@ void node::handle_pdu(const port_ptr_t& port, const sockaddr_t& from, const sock
         return;
     }
 
-    const auto payload = frame_payload_view(frame, pdu);
+    const auto payload = frame_payload_view(cframe, pdu);
     if (payload.empty())
     {
         return;
@@ -473,77 +484,77 @@ void node::handle_pdu(const port_ptr_t& port, const sockaddr_t& from, const sock
         {
             cum::msg1 msg;
             cum::decode_per(msg, ctx);
-            handle_btp_message(port, from, frame, msg);
+            handle_btp_message(port, from, cframe, msg);
             break;
         }
         case E_PAYLOAD_TYPE_MSG2:
         {
             cum::msg2 msg;
             cum::decode_per(msg, ctx);
-            handle_btp_message(port, from, frame, msg);
+            handle_btp_message(port, from, cframe, msg);
             break;
         }
         case E_PAYLOAD_TYPE_QUERY_NETWORK_SECURITY:
         {
             cum::query_network_security msg;
             cum::decode_per(msg, ctx);
-            handle_btp_message(port, from, frame, msg);
+            handle_btp_message(port, from, cframe, msg);
             break;
         }
         case E_PAYLOAD_TYPE_NETWORK_SECURITY_INFORMATION:
         {
             cum::network_security_information msg;
             cum::decode_per(msg, ctx);
-            handle_btp_message(port, from, frame, msg);
+            handle_btp_message(port, from, cframe, msg);
             break;
         }
         case E_PAYLOAD_TYPE_NETWORK_KEYS_REQUEST:
         {
             cum::network_keys_request msg;
             cum::decode_per(msg, ctx);
-            handle_btp_message(port, from, frame, msg);
+            handle_btp_message(port, from, cframe, msg);
             break;
         }
         case E_PAYLOAD_TYPE_NETWORK_KEYS_RESPONSE:
         {
             cum::network_keys_response msg;
             cum::decode_per(msg, ctx);
-            handle_btp_message(port, from, frame, msg);
+            handle_btp_message(port, from, cframe, msg);
             break;
         }
         case E_PAYLOAD_TYPE_NETWORK_KEY_REFRESH:
         {
             cum::network_key_refresh msg;
             cum::decode_per(msg, ctx);
-            handle_btp_message(port, from, frame, msg);
+            handle_btp_message(port, from, cframe, msg);
             break;
         }
         case E_PAYLOAD_TYPE_LINK_INFO:
         {
             cum::link_info msg;
             cum::decode_per(msg, ctx);
-            handle_btp_message(port, from, frame, msg);
+            handle_btp_message(port, from, cframe, msg);
             break;
         }
         case E_PAYLOAD_TYPE_LINK_REPORT:
         {
             cum::link_report msg;
             cum::decode_per(msg, ctx);
-            handle_btp_message(port, from, frame, msg);
+            handle_btp_message(port, from, cframe, msg);
             break;
         }
         case E_PAYLOAD_TYPE_ROUTE_ANNOUNCE:
         {
             cum::route_announce msg;
             cum::decode_per(msg, ctx);
-            handle_btp_message(port, from, frame, msg);
+            handle_btp_message(port, from, cframe, msg);
             break;
         }
         case E_PAYLOAD_TYPE_N2N_INDICATION:
         {
             cum::n2n_indication msg;
             cum::decode_per(msg, ctx);
-            handle_btp_message(port, from, frame, msg);
+            handle_btp_message(port, from, cframe, msg);
             break;
         }
         case E_PAYLOAD_TYPE_TUNNEL_DATA:
@@ -654,7 +665,7 @@ void node::handle_btp_message(const port_ptr_t& port, const sockaddr_t& from, co
         }
     }
 
-    if (msg.sec_ctx >= 16)
+    if (msg.sec_ctx == k_sec_ctx_none || msg.sec_ctx >= 16)
     {
         peer_send_msg2(peer, port, from, msg.id, cum::status_e::VERIFICATION_FAILED, nullptr);
         return;
@@ -693,7 +704,10 @@ void node::handle_btp_message(const port_ptr_t& port, const sockaddr_t& from, co
     sec_ctx.integrity_algorithm       = msg.integrity_algorithm;
     sec_ctx.integrity_key             = dhke.derive_integrity_key(sec_ctx.integrity_algorithm);
     sec_ctx.confidentiality_key       = dhke.derive_confidentiality_key(sec_ctx.confidentiality_algorithm);
+    sec_ctx.rx_integrity_key          = dhke.derive_receive_integrity_key(sec_ctx.integrity_algorithm);
+    sec_ctx.rx_confidentiality_key    = dhke.derive_receive_confidentiality_key(sec_ctx.confidentiality_algorithm);
     sec_ctx.is_expiring               = false;
+    sec_ctx.has_rx_sn                 = false;
     peer_schedule_sec_ctx_renewal_timer(peer, sec_ctx, msg.expiration_time_s);
 
     peer_send_msg2(peer, port, from, msg.id, cum::status_e::OK, &dhke);
@@ -763,7 +777,10 @@ void node::handle_btp_message(const port_ptr_t& port, const sockaddr_t& from, co
         sec_ctx.integrity_algorithm        = sec_proc_ctx.msg1.integrity_algorithm;
         sec_ctx.integrity_key              = sec_proc_ctx.dhke.derive_integrity_key(sec_ctx.integrity_algorithm);
         sec_ctx.confidentiality_key        = sec_proc_ctx.dhke.derive_confidentiality_key(sec_ctx.confidentiality_algorithm);
+        sec_ctx.rx_integrity_key           = sec_proc_ctx.dhke.derive_receive_integrity_key(sec_ctx.integrity_algorithm);
+        sec_ctx.rx_confidentiality_key     = sec_proc_ctx.dhke.derive_receive_confidentiality_key(sec_ctx.confidentiality_algorithm);
         sec_ctx.is_expiring                = false;
+        sec_ctx.has_rx_sn                  = false;
         peer_schedule_sec_ctx_renewal_timer(peer, sec_ctx, sec_proc_ctx.msg1.expiration_time_s);
     }
 
@@ -968,7 +985,7 @@ peer_ptr_t node::peer_create(const node_id_t& node_id)
 uint8_t node::peer_get_next_sec_ctx_id(const peer_ptr_t& peer)
 {
     std::set<uint8_t> sec_ctx_ids;
-    for (uint8_t i = 0; i < 16; i++)
+    for (uint8_t i = 1; i < 16; i++)
     {
         sec_ctx_ids.insert(i);
     }
@@ -980,7 +997,7 @@ uint8_t node::peer_get_next_sec_ctx_id(const peer_ptr_t& peer)
 
     if (sec_ctx_ids.empty())
     {
-        return 0;
+        return 1;
     }
 
     return *sec_ctx_ids.begin();
@@ -2139,7 +2156,7 @@ void node::network_send_key_refresh()
         return;
     }
 
-    const auto* ctx = get_network_sec_ctx(keys.front().sec_ctx);
+    const auto* ctx = network_select_sec_ctx();
     if (!ctx)
     {
         return;
@@ -2161,7 +2178,7 @@ void node::network_send_key_refresh()
         frame.set_frame_type(frame_type_e::E_FRAME_TYPE_NETWORK);
         frame.set_sec_ctx(ctx->sec_ctx);
         frame.set_mac_size(integrity_mac_size(ctx->integrity_algorithm));
-        frame.set_sn(0);
+        frame.set_sn(network_tx_sn++);
         frame.set_src(selected_downstream_identity->node_id);
         frame.set_dst(0xFFFFFFFF);
         frame.set_ts(now_s());
@@ -2172,7 +2189,7 @@ void node::network_send_key_refresh()
         }
 
         pdu.resize(frame.get_size());
-        if (!protect_frame_mac(frame, ctx->integrity_algorithm, ctx->integrity_key))
+        if (!network_protect_frame(frame, *ctx))
         {
             log(*g_logger, E_LOG_BIT_ERROR,
                 "node[%p]::network_send_key_refresh: failed to protect refresh for sec_ctx %u!",
@@ -2449,7 +2466,7 @@ void node::network_send_public_message(const Msg& msg)
     }
 }
 
-bool node::network_accept_rx(const frame_const_t& frame, bfc::const_buffer_view pdu)
+bool node::network_accept_rx(frame_t& frame)
 {
     const uint8_t sec_ctx_id = frame.get_sec_ctx();
     auto* ctx = get_network_sec_ctx(sec_ctx_id);
@@ -2460,10 +2477,23 @@ bool node::network_accept_rx(const frame_const_t& frame, bfc::const_buffer_view 
         return false;
     }
 
-    if (!verify_frame_mac(frame, pdu, ctx->integrity_algorithm, ctx->integrity_key))
+    const uint32_t sn = frame.get_sn();
+    const node_id_t src = frame.get_src();
+    auto sn_it = ctx->last_rx_sn_by_src.find(src);
+    if (sn_it != ctx->last_rx_sn_by_src.end() && sn <= sn_it->second)
+    {
+        log(*g_logger, E_LOG_BIT_INFO, "node[%p]::network_accept_rx: replay sn %u for src %04x sec_ctx %u!", this, sn, src, sec_ctx_id);
+        return false;
+    }
+
+    if (!accept_frame(frame,
+                      ctx->integrity_algorithm,
+                      ctx->integrity_key,
+                      ctx->confidentiality_algorithm,
+                      ctx->confidentiality_key))
     {
         ++ctx->integrity_failure;
-        log(*g_logger, E_LOG_BIT_INFO, "node[%p]::network_accept_rx: network MAC verification failed for sec_ctx %u, dropping frame!", this, sec_ctx_id);
+        log(*g_logger, E_LOG_BIT_INFO, "node[%p]::network_accept_rx: network frame accept failed for sec_ctx %u, dropping frame!", this, sec_ctx_id);
         if (ctx->integrity_success == 0)
         {
             network_acquire_keys();
@@ -2472,7 +2502,78 @@ bool node::network_accept_rx(const frame_const_t& frame, bfc::const_buffer_view 
     }
 
     ++ctx->integrity_success;
+    ctx->last_rx_sn_by_src[src] = sn;
     return true;
+}
+
+bool node::peer_accept_rx(const peer_ptr_t& peer, frame_t& frame)
+{
+    security_ctx_s* sec_ctx = peer_find_sec_ctx(peer, frame.get_sec_ctx());
+    if (!sec_ctx)
+    {
+        log(*g_logger, E_LOG_BIT_INFO, "node[%p]::peer_accept_rx: unknown peer sec_ctx %u from %04x!", this, frame.get_sec_ctx(), peer->node_id);
+        return false;
+    }
+
+    const uint32_t sn = frame.get_sn();
+    if (sec_ctx->has_rx_sn && sn <= sec_ctx->last_rx_sn)
+    {
+        log(*g_logger, E_LOG_BIT_INFO, "node[%p]::peer_accept_rx: replay sn %u from peer %04x!", this, sn, peer->node_id);
+        return false;
+    }
+
+    if (!accept_frame(frame,
+                      sec_ctx->integrity_algorithm,
+                      sec_ctx->rx_integrity_key,
+                      sec_ctx->confidentiality_algorithm,
+                      sec_ctx->rx_confidentiality_key))
+    {
+        log(*g_logger, E_LOG_BIT_INFO, "node[%p]::peer_accept_rx: accept failed for peer %04x sec_ctx %u!", this, peer->node_id, sec_ctx->id);
+        return false;
+    }
+
+    sec_ctx->last_rx_sn = sn;
+    sec_ctx->has_rx_sn = true;
+    return true;
+}
+
+bool node::network_protect_frame(frame_t& frame, const network_key_ctx_s& ctx)
+{
+    return protect_frame(frame,
+                         ctx.integrity_algorithm,
+                         ctx.integrity_key,
+                         ctx.confidentiality_algorithm,
+                         ctx.confidentiality_key);
+}
+
+const network_key_ctx_s* node::network_select_sec_ctx() const
+{
+    const uint64_t now = now_s();
+    const network_key_ctx_s* best_non_expiring = nullptr;
+    const network_key_ctx_s* best_expiring = nullptr;
+
+    for (const auto& ctx : network_security_contexts)
+    {
+        if (ctx.expiration_time_s <= now)
+        {
+            continue;
+        }
+
+        const bool expiring = ctx.expiration_time_s < now + config.security_ctx_grace_period_s;
+        if (!expiring)
+        {
+            if (!best_non_expiring || ctx.expiration_time_s < best_non_expiring->expiration_time_s)
+            {
+                best_non_expiring = &ctx;
+            }
+        }
+        else if (!best_expiring || ctx.expiration_time_s < best_expiring->expiration_time_s)
+        {
+            best_expiring = &ctx;
+        }
+    }
+
+    return best_non_expiring ? best_non_expiring : best_expiring;
 }
 
 bool node::network_try_send_frame(const port_ptr_t& port, const sockaddr_t& to, bfc::sized_buffer pdu, uint8_t sec_ctx)
@@ -2496,12 +2597,20 @@ bool node::peer_send_message(const peer_ptr_t& peer, const port_ptr_t& port, con
         return false;
     }
 
+    const security_ctx_s* sec_ctx = peer_select_sec_ctx(peer);
+    if (!sec_ctx)
+    {
+        log(*g_logger, E_LOG_BIT_INFO, "node[%p]::peer_send_message: no usable peer sec_ctx for peer %04x!", this, peer->node_id);
+        peer_start_security_procedure(peer);
+        return false;
+    }
+
     bfc::sized_buffer pdu(1024 * 65);
     auto frame = prepare_frame(pdu);
     frame.set_ttl(1);
     frame.set_frame_type(frame_type_e::E_FRAME_TYPE_PEER);
-    frame.set_sec_ctx(k_sec_ctx_none);
-    frame.set_mac_size_units(0);
+    frame.set_sec_ctx(sec_ctx->id);
+    frame.set_mac_size(integrity_mac_size(sec_ctx->integrity_algorithm));
     frame.set_src(selected_downstream_identity->node_id);
     frame.set_dst(peer->node_id);
     frame.set_ts(now_s());
@@ -2513,6 +2622,16 @@ bool node::peer_send_message(const peer_ptr_t& peer, const port_ptr_t& port, con
     }
 
     pdu.resize(frame.get_size());
+    if (!protect_frame(frame,
+                       sec_ctx->integrity_algorithm,
+                       sec_ctx->integrity_key,
+                       sec_ctx->confidentiality_algorithm,
+                       sec_ctx->confidentiality_key))
+    {
+        log(*g_logger, E_LOG_BIT_ERROR, "node[%p]::peer_send_message: failed to protect frame for peer %04x!", this, peer->node_id);
+        return false;
+    }
+
     port->transport->out.push(transport_out_t{transport_data_s{0, to, std::move(pdu)}});
     return true;
 }
